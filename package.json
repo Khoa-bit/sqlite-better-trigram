@@ -1,18 +1,19 @@
 {
   "name": "better-trigram-js",
   "version": "1.0.0",
-  "module": "src/index.ts",
   "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "description": "Pure TypeScript trigram tokenizer + search engine port of sqlite-better-trigram",
   "scripts": {
-    "build": "bun build --outdir=dist/js --minify --sourcemap=linked ./src/index.ts",
+    "build": "bun build --outdir=dist/js --minify --sourcemap=linked ./src/index.ts && tsc --project tsconfig.build.json",
     "test": "bun test",
     "bench": "bun run bench/tokenizer.bench.ts && bun run better-trigram.bench.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
-    "lorem-ipsum": "^2.0.8",
+    "lorem-ipsum": "^3.0.0",
     "mitata": "^1.0.34",
     "typescript": "^7.0.2"
   }
