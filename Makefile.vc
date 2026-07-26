@@ -11,7 +11,7 @@ SQLITE_AMALGAMATION_PATH = deps\sqlite-amalgamation-$(SQLITE_VERSION)
 TCL_DOWNLOAD_URL = https://www.irontcl.com/downloads/irontcl-amd64-8.6.7.zip
 TCLSH_PATH = deps\IronTcl\bin\tclsh86t.exe
 
-CFLAGS = -I$(SQLITE_AMALGAMATION_PATH) -I$(SQLITE_SOURCE_PATH)\ext\fts5 -Os -Wall
+CFLAGS = -I. -I$(SQLITE_AMALGAMATION_PATH) -I$(SQLITE_SOURCE_PATH)\ext\fts5 -O2 -Wall
 
 prefix=dist
 $(prefix):
@@ -28,6 +28,8 @@ clean:
     if exist deps rmdir /S /Q deps
     if exist $(prefix) rmdir /S /Q $(prefix)
     if exist *.obj del *.obj
+    if exist fold-table.h del fold-table.h
+    if exist fold-diacritic-table.h del fold-diacritic-table.h
 
 $(SQLITE_SOURCE_PATH):
     @echo Downloading SQLite source...
@@ -50,8 +52,15 @@ $(TCLSH_PATH):
     powershell -NoProfile -Command "if (-not (Test-Path 'deps')) { New-Item -ItemType Directory -Path 'deps' -Force | Out-Null }; Expand-Archive -Path 'tcl.zip' -DestinationPath 'deps' -Force"
     del tcl.zip
 
-$(TARGET_LOADABLE): $(SQLITE_SOURCE_PATH) $(SQLITE_AMALGAMATION_PATH) $(prefix)
+FOLD_TABLES = fold-table.h fold-diacritic-table.h
+
+$(TARGET_LOADABLE): $(SQLITE_SOURCE_PATH) $(SQLITE_AMALGAMATION_PATH) $(FOLD_TABLES) $(prefix)
     cl $(CFLAGS) /MT /LD /Fe$@ better-trigram.c
+
+$(FOLD_TABLES): gen-fold-table.c $(SQLITE_SOURCE_PATH)
+    cl $(CFLAGS) gen-fold-table.c
+    gen-fold-table.exe
+    del gen-fold-table.exe gen-fold-table.obj
 
 $(TARGET_LEMON): $(SQLITE_SOURCE_PATH) $(prefix)
     cl /MT "$(SQLITE_SOURCE_PATH)\tool\lemon.c" /Fe$@

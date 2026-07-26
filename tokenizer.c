@@ -17,7 +17,8 @@ typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
 
-#include "fts5_unicode2.c"
+#include "fold-table.h"
+#include "fold-diacritic-table.h"
 
 /*
 ** The following macro - WRITE_UTF8 - have been copied
@@ -132,11 +133,21 @@ static inline int isCJK(int iCode) {
 }
 
 /* Function to optionally fold case and remove diacritics */
+/* Uses precomputed lookup tables instead of runtime binary search */
 static inline int customFold(int iCode, int foldCase, int removeDiacritics) {
   if (iCode == 0)
     return iCode;
-  if (foldCase)
-    return sqlite3Fts5UnicodeFold(iCode, removeDiacritics);
+  if (!foldCase)
+    return iCode;
+  if (iCode < 128) {
+    if (iCode >= 'A' && iCode <= 'Z')
+      return iCode + 32;
+    return iCode;
+  }
+  if (iCode < 65536)
+    return removeDiacritics ? aFoldDiacriticTable[iCode] : aFoldTable[iCode];
+  if (iCode >= 66560 && iCode < 66600)
+    return iCode + 40;
   return iCode;
 }
 
