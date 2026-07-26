@@ -45,11 +45,16 @@ static void generate_table(const char *zFilename, const char *zGuard,
     /* === custom diacritic patch === */
     if (eRemoveDiacritic) {
       switch (c) {
+        case 0x00C6: case 0x00E6: folded = 'a'; break; /* Æ/æ */
+        case 0x00D0: case 0x00F0: folded = 'd'; break; /* Ð/ð */
         case 0x00D8: case 0x00F8: folded = 'o'; break; /* Ø/ø */
+        case 0x00DE: case 0x00FE: folded = 't'; break; /* Þ/þ */
         case 0x0110: case 0x0111: folded = 'd'; break; /* Đ/đ */
         case 0x0126: case 0x0127: folded = 'h'; break; /* Ħ/ħ */
+        case 0x0130:              folded = 'i'; break; /* İ */
         case 0x0131:              folded = 'i'; break; /* ı */
         case 0x0141: case 0x0142: folded = 'l'; break; /* Ł/ł */
+        case 0x0152: case 0x0153: folded = 'o'; break; /* Œ/œ */
         case 0x01A0: case 0x01A1: folded = 'o'; break; /* Ơ/ơ */
         case 0x01AF: case 0x01B0: folded = 'u'; break; /* Ư/ư */
       }

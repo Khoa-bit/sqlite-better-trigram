@@ -8,3 +8,4 @@ cache/
 *.exe
 lempar.c
 dist/
+node_modules/

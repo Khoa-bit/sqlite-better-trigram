@@ -259,8 +259,197 @@ describe("remove_diacritics", () => {
   });
 });
 
+// ──────────────────────────────────────────────
+// Custom diacritic patch chars
+// ──────────────────────────────────────────────
+describe("custom diacritic patch", () => {
+  const db = initDatabase();
+  afterAll(() => db.close());
+
+  test("0.0", () => {
+    [
+      `CREATE VIRTUAL TABLE t0 USING fts5(y, tokenize='better_trigram remove_diacritics 1');`,
+      // ø→o, đ→d, ħ→h, ı→i, ł→l, ư→u via NFD
+      `INSERT INTO t0 VALUES('tørv er godt')`,
+      `INSERT INTO t0 VALUES('đức tính tốt')`,
+      `INSERT INTO t0 VALUES('ħaba ma sens')`,
+      `INSERT INTO t0 VALUES('bu alıntıdır')`,
+      `INSERT INTO t0 VALUES('łódź jest super')`,
+      `INSERT INTO t0 VALUES('cửa sổ mới')`,
+      `INSERT INTO t0 VALUES('Đại dương xanh thẳm')`,
+    ].forEach((stmt) => db.query(stmt).run());
+  });
+
+  // ── MATCH search ──
+
+  sqlTest(
+    db,
+    "0.1",
+    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('tor')`,
+    [],
+    "(tør)v er godt"
+  );
+
+  sqlTest(
+    db,
+    "0.2",
+    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('duc')`,
+    [],
+    "(đức) tính tốt"
+  );
+
+  sqlTest(
+    db,
+    "0.3",
+    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('hab')`,
+    [],
+    "(ħab)a ma sens"
+  );
+
+  sqlTest(
+    db,
+    "0.4",
+    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('ali')`,
+    [],
+    "bu (alı)ntıdır"
+  );
+
+  sqlTest(
+    db,
+    "0.5",
+    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('lod')`,
+    [],
+    "(łód)ź jest super"
+  );
+
+  sqlTest(
+    db,
+    "0.6",
+    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('moi')`,
+    [],
+    "cửa sổ (mới)"
+  );
+
+  sqlTest(
+    db,
+    "0.7",
+    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('dai')`,
+    [],
+    "(Đại) dương xanh thẳm"
+  );
+
+  // ── original diacritics also match ──
+
+  sqlTest(
+    db,
+    "0.8",
+    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('tørv')`,
+    [],
+    "(tørv) er godt"
+  );
+
+  sqlTest(
+    db,
+    "0.9",
+    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('łódź')`,
+    [],
+    "(łódź) jest super"
+  );
+
+  sqlTest(
+    db,
+    "0.10",
+    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('đức')`,
+    [],
+    "(đức) tính tốt"
+  );
+
+  // ── case-insensitive: uppercase query matches folded text ──
+
+  sqlTest(
+    db,
+    "0.11",
+    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('TOR')`,
+    [],
+    "(tør)v er godt"
+  );
+
+  sqlTest(
+    db,
+    "0.12",
+    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('DAI')`,
+    [],
+    "(Đại) dương xanh thẳm"
+  );
+
+  // ── LIKE with original diacritics (byte-level, uses trigram index) ──
+
+  sqlTest(db, "0.13", `SELECT rowid as res FROM t0 WHERE y LIKE '%tørv%'`, [], 1);
+  sqlTest(db, "0.14", `SELECT rowid as res FROM t0 WHERE y LIKE '%łódź%'`, [], 5);
+  sqlTest(db, "0.15", `SELECT rowid as res FROM t0 WHERE y LIKE '%Đại%'`, [], 7);
+
+  // ── remove_diacritics 2 ──
+
+  describe("level 2", () => {
+    const db2 = initDatabase();
+    afterAll(() => db2.close());
+
+    test("1.0", () => {
+      [
+        `CREATE VIRTUAL TABLE t1 USING fts5(y, tokenize='better_trigram remove_diacritics 2');`,
+        `INSERT INTO t1 VALUES('tørv er godt')`,
+        `INSERT INTO t1 VALUES('ħaba ma sens')`,
+        `INSERT INTO t1 VALUES('bu alıntıdır')`,
+        `INSERT INTO t1 VALUES('łódź jest super')`,
+        `INSERT INTO t1 VALUES('Đại dương xanh thẳm')`,
+      ].forEach((stmt) => db2.query(stmt).run());
+    });
+
+    sqlTest(
+      db2,
+      "1.1",
+      `SELECT highlight(t1, 0, '(', ')') as res FROM t1('tor')`,
+      [],
+      "(tør)v er godt"
+    );
+
+    sqlTest(
+      db2,
+      "1.2",
+      `SELECT highlight(t1, 0, '(', ')') as res FROM t1('hab')`,
+      [],
+      "(ħab)a ma sens"
+    );
+
+    sqlTest(
+      db2,
+      "1.3",
+      `SELECT highlight(t1, 0, '(', ')') as res FROM t1('ali')`,
+      [],
+      "bu (alı)ntıdır"
+    );
+
+    sqlTest(
+      db2,
+      "1.4",
+      `SELECT highlight(t1, 0, '(', ')') as res FROM t1('lod')`,
+      [],
+      "(łód)ź jest super"
+    );
+
+    sqlTest(
+      db2,
+      "1.5",
+      `SELECT highlight(t1, 0, '(', ')') as res FROM t1('dai')`,
+      [],
+      "(Đại) dương xanh thẳm"
+    );
+  });
+});
+
 describe("case_sensitive", () => {
   describe("v1", () => {
+
     const db = initDatabase();
 
     test("1.0", () => {
@@ -778,22 +967,22 @@ describe("cjk", () => {
   test("1.0", () => {
     [
       `CREATE VIRTUAL TABLE t1 USING fts5(y, tokenize='better_trigram remove_diacritics 1');`,
-      `INSERT INTO t1 VALUES('王明：这是什么？');`,
-      `INSERT INTO t1 VALUES('李红：这是书。');`,
-      `INSERT INTO t1 VALUES('王明：那是什么？');`,
-      `INSERT INTO t1 VALUES('李红：那是钢笔。');`,
-      `INSERT INTO t1 VALUES('王明：那是杂志吗？');`,
-      `INSERT INTO t1 VALUES('李红：不，那不是杂志。那是字典。');`,
-      `INSERT INTO t1 VALUES('some 李红：不，那不 text 是杂志。in 那是 chinese 字典。');`,
+      `INSERT INTO t1 VALUES('苹果：这是什么？');`,
+      `INSERT INTO t1 VALUES('西瓜：这是书。');`,
+      `INSERT INTO t1 VALUES('苹果：那是什么？');`,
+      `INSERT INTO t1 VALUES('西瓜：那是钢笔。');`,
+      `INSERT INTO t1 VALUES('苹果：那是杂志吗？');`,
+      `INSERT INTO t1 VALUES('西瓜：不，那不是杂志。那是字典。');`,
+      `INSERT INTO t1 VALUES('some 西瓜：不，那不 text 是杂志。in 那是 chinese 字典。');`,
     ].forEach((stmt) => db.query(stmt).run());
   });
 
   sqlTest(
     db,
     `1.1`,
-    `SELECT highlight(t1, 0, '(', ')') as res FROM t1('王明');`,
+    `SELECT highlight(t1, 0, '(', ')') as res FROM t1('苹果');`,
     [],
-    ["(王明)：这是什么？", "(王明)：那是什么？", "(王明)：那是杂志吗？"]
+    ["(苹果)：这是什么？", "(苹果)：那是什么？", "(苹果)：那是杂志吗？"]
   );
 
   sqlTest(
@@ -802,11 +991,11 @@ describe("cjk", () => {
     `SELECT highlight(t1, 0, '(', ')') as res FROM t1('那是');`,
     [],
     [
-      "王明：(那是)什么？",
-      "李红：(那是)钢笔。",
-      "王明：(那是)杂志吗？",
-      "李红：不，那不是杂志。(那是)字典。",
-      "some 李红：不，那不 text 是杂志。in (那是) chinese 字典。",
+      "苹果：(那是)什么？",
+      "西瓜：(那是)钢笔。",
+      "苹果：(那是)杂志吗？",
+      "西瓜：不，那不是杂志。(那是)字典。",
+      "some 西瓜：不，那不 text 是杂志。in (那是) chinese 字典。",
     ]
   );
 
@@ -815,23 +1004,23 @@ describe("cjk", () => {
     `1.3`,
     `SELECT highlight(t1, 0, '(', ')') as res FROM t1('钢');`,
     [],
-    ["李红：那是(钢)笔。"]
+    ["西瓜：那是(钢)笔。"]
   );
 
   sqlTest(
     db,
     `1.4`,
-    `SELECT highlight(t1, 0, '(', ')') as res FROM t1('王明：');`,
+    `SELECT highlight(t1, 0, '(', ')') as res FROM t1('苹果：');`,
     [],
-    ["(王明：)这是什么？", "(王明：)那是什么？", "(王明：)那是杂志吗？"]
+    ["(苹果：)这是什么？", "(苹果：)那是什么？", "(苹果：)那是杂志吗？"]
   );
 
   sqlTest(
     db,
     `1.4`,
-    `SELECT highlight(t1, 0, '(', ')') as res FROM t1('some 李红');`,
+    `SELECT highlight(t1, 0, '(', ')') as res FROM t1('some 西瓜');`,
     [],
-    ["(some) (李红)：不，那不 text 是杂志。in 那是 chinese 字典。"]
+    ["(some) (西瓜)：不，那不 text 是杂志。in 那是 chinese 字典。"]
   );
 
   test("1.5 (Japanese Setup)", () => {
@@ -862,7 +1051,7 @@ describe("cjk", () => {
       [
         `CREATE VIRTUAL TABLE t1 USING fts5(y, tokenize='better_trigram');`,
         `INSERT INTO t1 VALUES('Con đường dài và đẹp');`,
-        `INSERT INTO t1 VALUES('Đường phố Hà Nội');`,
+        `INSERT INTO t1 VALUES('Đường phố mới xây');`,
         `INSERT INTO t1 VALUES('Tiếng Việt có dấu');`,
       ].forEach((stmt) => db.query(stmt).run());
     });
@@ -884,7 +1073,7 @@ describe("cjk", () => {
       `1.1`,
       `SELECT highlight(t1, 0, '(', ')') as res FROM t1('đường');`,
       [],
-      ["Con (đường) dài và đẹp", "(Đường) phố Hà Nội"]
+      ["Con (đường) dài và đẹp", "(Đường) phố mới xây"]
     );
 
     // substring within đẹp (U+0111 + U+1EB9 + U+0070)
@@ -896,13 +1085,13 @@ describe("cjk", () => {
       ["Con đường dài và (đẹp)"]
     );
 
-    // word boundary: "hà nội" across space (FTS5 AND semantics)
+    // word boundary: "mới xây" across space (FTS5 AND semantics)
     sqlTest(
       db,
       `1.3`,
-      `SELECT highlight(t1, 0, '(', ')') as res FROM t1('hà nội');`,
+      `SELECT highlight(t1, 0, '(', ')') as res FROM t1('mới xây');`,
       [],
-      ["Đường phố (Hà) (Nội)"]
+      ["Đường phố (mới) (xây)"]
     );
 
     // uppercase Đ (U+0110) case-folds to đ (U+0111)
@@ -911,7 +1100,7 @@ describe("cjk", () => {
       `1.4`,
       `SELECT highlight(t1, 0, '(', ')') as res FROM t1('Đường');`,
       [],
-      ["Con (đường) dài và đẹp", "(Đường) phố Hà Nội"]
+      ["Con (đường) dài và đẹp", "(Đường) phố mới xây"]
     );
 
     // LIKE with đ (byte-level — Đ != đ, only row 1 matches)
