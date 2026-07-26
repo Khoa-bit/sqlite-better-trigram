@@ -296,12 +296,12 @@ describe("offset correctness", () => {
 
   test("simple offsets", () => {
     const tokens = t.tokenize("hello world");
-    expect(tokens[0]).toEqual({ text: "hel", startOffset: 0, endOffset: 3 });
+    expect(tokens[0]).toEqual({ text: "hel", startOffset: 0, endOffset: 3, kind: "trigram" });
     // "hello" → tokens[0]=hel(0-3), [1]=ell(1-4), [2]=llo(2-5)
     // space resets
     // "world" → tokens[3]=wor(6-9), [4]=orl(7-10), [5]=rld(8-11)
-    expect(tokens[2]).toEqual({ text: "llo", startOffset: 2, endOffset: 5 });
-    expect(tokens[3]).toEqual({ text: "wor", startOffset: 6, endOffset: 9 });
+    expect(tokens[2]).toEqual({ text: "llo", startOffset: 2, endOffset: 5, kind: "trigram" });
+    expect(tokens[3]).toEqual({ text: "wor", startOffset: 6, endOffset: 9, kind: "trigram" });
   });
 });
 

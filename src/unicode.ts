@@ -96,7 +96,11 @@ export function foldChar(
 
   // Case folding
   let result = options.caseSensitive ? char : char.toLowerCase();
-  // JS toLowerCase can expand (e.g. ß→ss). Take first codepoint.
+
+  // ASCII has no diacritics → skip NFD entirely
+  if (codepoint < 128) return result;
+
+  // JS toLowerCase can expand for non-ASCII (e.g. ß→ss). Take first codepoint.
   if (result.length > 1) {
     result = String.fromCodePoint(result.codePointAt(0)!);
   }
