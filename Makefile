@@ -8,7 +8,7 @@ SQLITE_SOURCE_PATH = deps/sqlite-src-$(SQLITE_VERSION)
 SQLITE_AMALGAMATION_URL = https://sqlite.org/$(YEAR)/sqlite-amalgamation-$(SQLITE_VERSION).zip
 SQLITE_AMALGAMATION_PATH = deps/sqlite-amalgamation-$(SQLITE_VERSION)
 
-override CFLAGS += -I$(SQLITE_SOURCE_PATH)/ext/fts5 -I$(SQLITE_AMALGAMATION_PATH) -Os -Wall -Wextra
+override CFLAGS += -I. -I$(SQLITE_SOURCE_PATH)/ext/fts5 -I$(SQLITE_AMALGAMATION_PATH) -O3 -march=native -Wall -Wextra
 CONDITIONAL_CFLAGS = -lm
 
 UNAME_S := $(shell uname -s)
@@ -33,6 +33,7 @@ loadable: $(TARGET_LOADABLE)
 clean:
 	rm -rf deps
 	rm -rf $(prefix)
+	rm -f fold-table.h fold-diacritic-table.h
 
 $(SQLITE_SOURCE_PATH):
 	@echo Downloading SQLite source...
@@ -48,8 +49,15 @@ $(SQLITE_AMALGAMATION_PATH):
 	unzip sqlite.zip -d deps/
 	rm -f sqlite.zip
 
-$(TARGET_LOADABLE): $(SQLITE_SOURCE_PATH) $(SQLITE_AMALGAMATION_PATH) $(prefix)
+FOLD_TABLES = fold-table.h fold-diacritic-table.h
+
+$(TARGET_LOADABLE): $(SQLITE_SOURCE_PATH) $(SQLITE_AMALGAMATION_PATH) $(FOLD_TABLES) $(prefix)
 	$(CC) $(CFLAGS) $(CONDITIONAL_CFLAGS) -shared -fPIC -o $@ better-trigram.c
+
+$(FOLD_TABLES): gen-fold-table.c $(SQLITE_SOURCE_PATH)
+	$(CC) $(CFLAGS) -o gen-fold-table gen-fold-table.c $(CONDITIONAL_CFLAGS)
+	./gen-fold-table
+	rm -f gen-fold-table
 
 $(TARGET_FTS5): $(SQLITE_SOURCE_PATH) $(SQLITE_AMALGAMATION_PATH) $(prefix)
 	dir=$(SQLITE_SOURCE_PATH) \
