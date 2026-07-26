@@ -26,7 +26,11 @@ if (process.platform === "darwin" && process.env.SQLITE_LIB_PATH)
 
 function initDatabase() {
   const db = new Database(":memory:");
-  db.loadExtension(`./dist/fts5${EXT}`);
+  try {
+    db.loadExtension(`./dist/fts5${EXT}`);
+  } catch {
+    // FTS5 may be compiled into SQLite already; skip standalone load
+  }
   db.loadExtension(`./dist/better-trigram${EXT}`);
   return db;
 }
@@ -293,6 +297,14 @@ describe("case_sensitive", () => {
       `SELECT fts5_expr('ABCD', 'tokenize=better_trigram') as res`,
       [],
       `"abc" + "bcd"`
+    );
+
+    sqlTest(
+      db,
+      `1.2.1`,
+      `SELECT fts5_expr('foo\nbar', 'tokenize=better_trigram') as res`,
+      [],
+      `"foo" AND "bar"`
     );
 
     (

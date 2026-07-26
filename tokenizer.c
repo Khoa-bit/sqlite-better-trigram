@@ -15,7 +15,7 @@
 
 typedef uint8_t u8;
 typedef uint16_t u16;
-typedef uint16_t u32;
+typedef uint32_t u32;
 
 #include "fts5_unicode2.c"
 
@@ -65,14 +65,20 @@ static const unsigned char sqlite3Utf8Trans1[] = {
     }                                                                          \
   }
 
-#define FTS5_SKIP_UTF8(zIn)                                                    \
-  {                                                                            \
-    if (((unsigned char)(*(zIn++))) >= 0xc0) {                                 \
-      while ((((unsigned char)*zIn) & 0xc0) == 0x80) {                         \
-        zIn++;                                                                 \
-      }                                                                        \
-    }                                                                          \
+static inline const unsigned char *fts5SkipUtf8(const unsigned char *zIn,
+                                                 const unsigned char *zEnd) {
+  if (zIn >= zEnd) {
+    return zEnd;
   }
+
+  const unsigned char *zOut = zIn + 1;
+  if ((*zIn & 0xC0) == 0xC0) {
+    while (zOut < zEnd && (*zOut & 0xC0) == 0x80) {
+      zOut++;
+    }
+  }
+  return zOut;
+}
 
 static const int CJK[8][2] = {
     {0x3000, 0x30FF},   // CJK Symbols, Hiragana, Katakana
@@ -96,6 +102,22 @@ static const int CJK[8][2] = {
 // 2F800 — 2FA1F  CJK Compatibility Ideographs Supplement
 // 30000 — 3134F  CJK Unified Ideographs Extension G
 
+static inline int isWhitespace(int iCode) {
+  switch (iCode) {
+  case 0x09:
+  case 0x0A:
+  case 0x0B:
+  case 0x0C:
+  case 0x0D:
+  case 0x20:
+  case 0x85:
+  case 0xA0:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
 static inline int isCJK(int iCode) {
   for (int i = 0; i < 8; i++) {
     if (iCode < CJK[i][0]) { // smaller
@@ -118,7 +140,7 @@ static inline int customFold(int iCode, int foldCase, int removeDiacritics) {
   return iCode;
 }
 
-static void tokenize(const char *pText, int nText, int foldCase,
+static int tokenize(const char *pText, int nText, int foldCase,
                      int removeDiacritics, void *pCtx,
                      int (*xToken)(void *, int, const char *, int, int, int)) {
   const unsigned char *zIn = (const unsigned char *)pText;
@@ -134,7 +156,7 @@ static void tokenize(const char *pText, int nText, int foldCase,
     int start;
 
     do {
-      start = zIn - (const unsigned char *)pText;
+      start = (int)(zIn - (const unsigned char *)pText);
       READ_UTF8(zIn, zEnd, iCode);
       if (iCode == 0)
         break;
@@ -145,17 +167,19 @@ static void tokenize(const char *pText, int nText, int foldCase,
       break;
 
     if (i == 3) {
-      int result = xToken(pCtx, 0, aBuf, zOut - aBuf, aStart[0], start);
+      int result = xToken(pCtx, 0, aBuf, (int)(zOut - aBuf), aStart[0], start);
       if (result != 0)
-        break;
+        return result;
 
       // remove first UTF-8 character from aBuf
-      const char *z1 = aBuf;
-      FTS5_SKIP_UTF8(z1);
-      memmove(aBuf, z1, zOut - z1);
+      const unsigned char *z1 = (const unsigned char *)aBuf;
+      const unsigned char *zAfter =
+          fts5SkipUtf8(z1, (const unsigned char *)zOut);
+      int nFirstChar = (int)(zAfter - z1);
+      memmove(aBuf, (const char *)zAfter, zOut - (const char *)zAfter);
       // seek zOut back 1 step so we can add the next character
       // of the trigram
-      zOut = zOut - (z1 - aBuf);
+      zOut -= nFirstChar;
 
       // swap the offsets
       aStart[0] = aStart[1];
@@ -166,24 +190,23 @@ static void tokenize(const char *pText, int nText, int foldCase,
     }
 
     int cjk = isCJK(iCode);
-    int isSpace = iCode == 32;
+    int isSpace = isWhitespace(iCode);
     if (isSpace || cjk) {
       // write words smaller than 3 characters directly to output
       // but make sure we aren't at the end of a word
       if (!isPartial && i && i < 3) {
-        int result = xToken(pCtx, 0, aBuf, zOut - aBuf, aStart[0], start);
+        int result = xToken(pCtx, 0, aBuf, (int)(zOut - aBuf), aStart[0], start);
         if (result != 0)
-          break;
+          return result;
       }
 
       if (cjk) {
         zOut = aBuf;
         WRITE_UTF8(zOut, iCode);
 
-        int result =
-            xToken(pCtx, 0, aBuf, zOut - aBuf, start, start + (zOut - aBuf));
+        int result = xToken(pCtx, 0, aBuf, (int)(zOut - aBuf), start, start + (int)(zOut - aBuf));
         if (result != 0)
-          break;
+          return result;
       }
 
       // reset for next word
@@ -199,7 +222,9 @@ static void tokenize(const char *pText, int nText, int foldCase,
 
   // write out the remaining tokens if any
   if (i > 0) {
-    xToken(pCtx, 0, aBuf, zOut - aBuf, aStart[0],
-           zIn - (const unsigned char *)pText);
+    return xToken(pCtx, 0, aBuf, (int)(zOut - aBuf), aStart[0],
+                  (int)(zIn - (const unsigned char *)pText));
   }
+
+  return 0;
 }
