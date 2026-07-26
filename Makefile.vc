@@ -24,8 +24,10 @@ TARGET_LEMON=$(prefix)\lemon.exe
 all: test loadable
 loadable: $(TARGET_LOADABLE)
 
-clean:
+clean-all: clean
     if exist deps rmdir /S /Q deps
+
+clean:
     if exist $(prefix) rmdir /S /Q $(prefix)
     if exist *.obj del *.obj
     if exist fold-table.h del fold-table.h

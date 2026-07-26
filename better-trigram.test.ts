@@ -853,6 +853,147 @@ describe("cjk", () => {
     ["(リンゴ)を食べます。"]
   );
 
+
+  describe("vietnamese", () => {
+    const db = initDatabase();
+    afterAll(() => db.close());
+
+    test("1.0", () => {
+      [
+        `CREATE VIRTUAL TABLE t1 USING fts5(y, tokenize='better_trigram');`,
+        `INSERT INTO t1 VALUES('Con đường dài và đẹp');`,
+        `INSERT INTO t1 VALUES('Đường phố Hà Nội');`,
+        `INSERT INTO t1 VALUES('Tiếng Việt có dấu');`,
+      ].forEach((stmt) => db.query(stmt).run());
+    });
+
+    // fts5_expr verifies tokenization
+    //   đ (U+0111) → đ, 5-char "đường" → đườ+ườn+ờng
+    //   3-char "dài" → dài, 2-char "và" → và (single token)
+    sqlTest(
+      db,
+      `0.1`,
+      `SELECT fts5_expr('con đường dài và đẹp', 'tokenize=better_trigram') as res`,
+      [],
+      `"con" AND "đườ" + "ườn" + "ờng" AND "dài" AND "và" AND "đẹp"`
+    );
+
+    // đ (U+0111) single codepoint, not d+combining — should match itself
+    sqlTest(
+      db,
+      `1.1`,
+      `SELECT highlight(t1, 0, '(', ')') as res FROM t1('đường');`,
+      [],
+      ["Con (đường) dài và đẹp", "(Đường) phố Hà Nội"]
+    );
+
+    // substring within đẹp (U+0111 + U+1EB9 + U+0070)
+    sqlTest(
+      db,
+      `1.2`,
+      `SELECT highlight(t1, 0, '(', ')') as res FROM t1('đẹp');`,
+      [],
+      ["Con đường dài và (đẹp)"]
+    );
+
+    // word boundary: "hà nội" across space (FTS5 AND semantics)
+    sqlTest(
+      db,
+      `1.3`,
+      `SELECT highlight(t1, 0, '(', ')') as res FROM t1('hà nội');`,
+      [],
+      ["Đường phố (Hà) (Nội)"]
+    );
+
+    // uppercase Đ (U+0110) case-folds to đ (U+0111)
+    sqlTest(
+      db,
+      `1.4`,
+      `SELECT highlight(t1, 0, '(', ')') as res FROM t1('Đường');`,
+      [],
+      ["Con (đường) dài và đẹp", "(Đường) phố Hà Nội"]
+    );
+
+    // LIKE with đ (byte-level — Đ != đ, only row 1 matches)
+    sqlTest(
+      db,
+      `1.5`,
+      `SELECT rowid as res FROM t1 WHERE y LIKE '%đường%'`,
+      [],
+      [1]
+    );
+  });
+
+  describe("vietnamese_case_sensitive", () => {
+    const db = initDatabase();
+    afterAll(() => db.close());
+
+    test("2.0", () => {
+      [
+        `CREATE VIRTUAL TABLE t2 USING fts5(y, tokenize='better_trigram case_sensitive 1');`,
+        `INSERT INTO t2 VALUES('Con đường dài');`,
+        `INSERT INTO t2 VALUES('Con Đường dài');`,
+      ].forEach((stmt) => db.query(stmt).run());
+    });
+
+    // case_sensitive 1: "đường" should NOT match "Đường"
+    sqlTest(
+      db,
+      `2.1`,
+      `SELECT highlight(t2, 0, '(', ')') as res FROM t2('đường');`,
+      [],
+      ["Con (đường) dài"]
+    );
+
+    sqlTest(
+      db,
+      `2.2`,
+      `SELECT highlight(t2, 0, '(', ')') as res FROM t2('Đường');`,
+      [],
+      ["Con (Đường) dài"]
+    );
+  });
+
+  describe("vietnamese_remove_diacritics", () => {
+    const db = initDatabase();
+    afterAll(() => db.close());
+
+    test("3.0", () => {
+      [
+        `CREATE VIRTUAL TABLE t3 USING fts5(y, tokenize='better_trigram remove_diacritics 2');`,
+        `INSERT INTO t3 VALUES('Con đường dài và đẹp');`,
+        `INSERT INTO t3 VALUES('Tiếng Việt có dấu');`,
+      ].forEach((stmt) => db.query(stmt).run());
+    });
+
+    // remove_diacritics 2: đ→d, ườ→uo — "duong" matches "đường"
+    sqlTest(
+      db,
+      `3.1`,
+      `SELECT highlight(t3, 0, '(', ')') as res FROM t3('duong');`,
+      [],
+      ["Con (đường) dài và đẹp"]
+    );
+
+    // "dep" matches "đẹp" (đ→d, ẹ→e)
+    sqlTest(
+      db,
+      `3.2`,
+      `SELECT highlight(t3, 0, '(', ')') as res FROM t3('dep');`,
+      [],
+      ["Con đường dài và (đẹp)"]
+    );
+
+    // "tieng viet" matches "Tiếng Việt" (FTS5 AND semantics)
+    sqlTest(
+      db,
+      `3.3`,
+      `SELECT highlight(t3, 0, '(', ')') as res FROM t3('tieng viet');`,
+      [],
+      ["(Tiếng) (Việt) có dấu"]
+    );
+  });
+
   // Kanji + Hiragana (The exact issue your PR fixes)
   sqlTest(
     db,
@@ -905,6 +1046,47 @@ describe("cjk", () => {
     `SELECT highlight(t1, 0, '(', ')') as res FROM t1('ﾝｶｸ');`,
     [],
     ["ﾊ(ﾝｶｸ)のﾃｽﾄ"]
+  );
+});
+
+describe("word_boundary", () => {
+  const db = initDatabase();
+  afterAll(() => db.close());
+
+  test("1.0", () => {
+    [
+      `CREATE VIRTUAL TABLE t1 USING fts5(y, tokenize='better_trigram');`,
+      `INSERT INTO t1 VALUES('i am a bird');`,
+      `INSERT INTO t1 VALUES('i am a cat');`,
+    ].forEach((stmt) => db.query(stmt).run());
+  });
+
+  // fts5_expr verifies tokenization: spaces split words,
+  // "a" is a single-char token (no trigrams), "bird"→"bir"+"ird"
+  sqlTest(
+    db,
+    "1.1",
+    `SELECT fts5_expr('a bird', 'tokenize=better_trigram') as res`,
+    [],
+    `"a" AND "bir" + "ird"`
+  );
+
+  // MATCH 'a bird' finds row 1, not row 2 (no 'bird' in row 2)
+  sqlTest(
+    db,
+    "1.2",
+    `SELECT highlight(t1, 0, '(', ')') as res FROM t1 WHERE t1 MATCH 'a bird'`,
+    [],
+    "i am (a) (bird)"
+  );
+
+  // MATCH 'a cat' finds row 2 only
+  sqlTest(
+    db,
+    "1.3",
+    `SELECT highlight(t1, 0, '(', ')') as res FROM t1 WHERE t1 MATCH 'a cat'`,
+    [],
+    "i am (a) (cat)"
   );
 });
 

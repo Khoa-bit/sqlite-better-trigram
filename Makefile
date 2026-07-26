@@ -30,6 +30,9 @@ TARGET_FTS5=$(prefix)/fts5$(EXT)
 all: test loadable
 loadable: $(TARGET_LOADABLE)
 
+clean-all: clean
+	rm -rf deps
+
 clean:
 	rm -rf deps
 	rm -rf $(prefix)
