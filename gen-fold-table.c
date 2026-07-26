@@ -41,6 +41,21 @@ static void generate_table(const char *zFilename, const char *zGuard,
 
   for (int c = 0; c < 65536; c++) {
     int folded = sqlite3Fts5UnicodeFold(c, eRemoveDiacritic);
+
+    /* === custom diacritic patch === */
+    if (eRemoveDiacritic) {
+      switch (c) {
+        case 0x00D8: case 0x00F8: folded = 'o'; break; /* Ø/ø */
+        case 0x0110: case 0x0111: folded = 'd'; break; /* Đ/đ */
+        case 0x0126: case 0x0127: folded = 'h'; break; /* Ħ/ħ */
+        case 0x0131:              folded = 'i'; break; /* ı */
+        case 0x0141: case 0x0142: folded = 'l'; break; /* Ł/ł */
+        case 0x01A0: case 0x01A1: folded = 'o'; break; /* Ơ/ơ */
+        case 0x01AF: case 0x01B0: folded = 'u'; break; /* Ư/ư */
+      }
+    }
+    /* --- custom diacritic patch --- */
+
     fprintf(f, "  %4d", folded);
     if (c < 65535)
       fprintf(f, ",");
