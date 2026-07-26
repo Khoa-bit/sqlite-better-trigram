@@ -11,12 +11,14 @@ import type { Token } from "./types";
 export class InvertedIndex {
   private postings = new Map<string, Map<number, number[]>>();
   private docs = new Map<number, string>();
+  private foldedDocs = new Map<number, string>();
   private docTokens = new Map<number, Set<string>>();
 
   // ── Mutation ──
 
-  add(docId: number, tokens: Token[], originalText: string): void {
+  add(docId: number, tokens: Token[], originalText: string, foldedText?: string): void {
     this.docs.set(docId, originalText);
+    this.foldedDocs.set(docId, foldedText ?? originalText);
 
     let tokenSet = this.docTokens.get(docId);
     if (!tokenSet) {
@@ -57,11 +59,13 @@ export class InvertedIndex {
     }
     this.docTokens.delete(docId);
     this.docs.delete(docId);
+    this.foldedDocs.delete(docId);
   }
 
   clear(): void {
     this.postings.clear();
     this.docs.clear();
+    this.foldedDocs.clear();
     this.docTokens.clear();
   }
 
@@ -73,6 +77,10 @@ export class InvertedIndex {
 
   getDoc(docId: number): string | undefined {
     return this.docs.get(docId);
+  }
+
+  getFoldedDoc(docId: number): string | undefined {
+    return this.foldedDocs.get(docId);
   }
 
   /** All doc IDs — used for fallback full-text scan. */

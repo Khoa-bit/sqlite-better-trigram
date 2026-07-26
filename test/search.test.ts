@@ -263,3 +263,107 @@ describe("multiple document index", () => {
     expect(result.length).toBe(100);
   });
 });
+
+// ──────────────────────────────────────────────
+// 10. Prefix search (1-char and 2-char queries)
+// ──────────────────────────────────────────────
+describe("prefix search", () => {
+  let engine: SearchEngine;
+
+  beforeEach(() => {
+    engine = new SearchEngine({ prefixSearch: true });
+    engine.addDocument(1, "hello world");
+    engine.addDocument(2, "hello there");
+    engine.addDocument(3, "goodbye world");
+    engine.addDocument(4, "hippopotamus");
+  });
+
+  test("1-char query 'h' matches docs with words starting with h", () => {
+    const result = engine.search("h").sort();
+    expect(result).toEqual([1, 2, 4]);
+  });
+
+  test("1-char query 'w' matches docs with words starting with w", () => {
+    const result = engine.search("w").sort();
+    expect(result).toEqual([1, 3]);
+  });
+
+  test("2-char query 'he' matches docs with words starting with he", () => {
+    const result = engine.search("he").sort();
+    expect(result).toEqual([1, 2]);
+  });
+
+  test("2-char query 'wo' matches docs with words starting with wo", () => {
+    const result = engine.search("wo").sort();
+    expect(result).toEqual([1, 3]);
+  });
+
+  test("3-char query 'hel' works via trigram path", () => {
+    const result = engine.search("hel").sort();
+    expect(result).toEqual([1, 2]);
+  });
+
+  test("mixed 1-char + 2-char query 'h wo' intersects results", () => {
+    const result = engine.search("h wo").sort();
+    expect(result).toEqual([1]);
+  });
+
+  test("mixed 1-char + 3-char query 'h wor' intersects results", () => {
+    const result = engine.search("h wor").sort();
+    expect(result).toEqual([1]);
+  });
+
+  test("query 'hi' matches 'hippopotamus' but not 'hello'", () => {
+    const result = engine.search("hi");
+    expect(result).toEqual([4]);
+  });
+
+  test("prefix search with diacritics", () => {
+    engine.addDocument(5, "café");
+    expect(engine.search("c")).toContain(5);
+    expect(engine.search("ca")).toContain(5);
+  });
+
+  test("phrase search with all-long tokens uses position adjacency", () => {
+    expect(engine.searchPhrase("hello world")).toEqual([1]);
+  });
+
+  test("phrase search with short tokens falls back to substring", () => {
+    const result = engine.searchPhrase("he wo");
+    expect(result).toContain(1);
+  });
+
+  test("non-matching prefix query returns empty", () => {
+    // No docs have words starting with "x", so prefix index returns empty
+    const result = engine.search("xy");
+    expect(result).toEqual([]);
+  });
+
+  test("removal works with prefix search", () => {
+    engine.removeDocument(1);
+    const result = engine.search("h").sort();
+    expect(result).toEqual([2, 4]);
+  });
+
+  test("empty query returns empty", () => {
+    expect(engine.search("")).toEqual([]);
+    expect(engine.searchPhrase("")).toEqual([]);
+  });
+
+  test("backward compat: engine without prefixSearch uses trigram substrings", () => {
+    const old = new SearchEngine();
+    old.addDocument(1, "hello world");
+    expect(old.search("hello")).toEqual([1]);
+    // Without prefixSearch, 2-char "he" falls through to full-text scan → matches
+    expect(old.search("he")).toEqual([1]);
+    expect(old.search("xyz")).toEqual([]);
+    expect(old.searchPhrase("hello world")).toEqual([1]);
+  });
+
+  test("single-char prefix in longer query still works", () => {
+    engine.addDocument(5, "a x y");
+    expect(engine.search("a")).toContain(5);
+    expect(engine.search("x")).toContain(5);
+    expect(engine.search("y")).toContain(5);
+  });
+});
