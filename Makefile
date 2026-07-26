@@ -1,12 +1,14 @@
 EXT = .so
-SQLITE_VERSION ?= version-3.49.1
+# https://sqlite.org/download.html
+YEAR := 2026
+SQLITE_VERSION := 3530400
 
-SQLITE_TARBALL_URL = https://www.sqlite.org/src/tarball/sqlite.tar.gz?r=${SQLITE_VERSION}
-SQLITE_SRC = deps/$(SQLITE_VERSION)/src
-SQLITE_AMALGAMATION_URL = https://sqlite.org/2025/sqlite-amalgamation-3490100.zip
-SQLITE_AMALGAMATION_PATH = deps/sqlite-amalgamation-3490100
+SQLITE_SOURCE_URL = https://sqlite.org/$(YEAR)/sqlite-src-$(SQLITE_VERSION).zip
+SQLITE_SOURCE_PATH = deps/sqlite-src-$(SQLITE_VERSION)
+SQLITE_AMALGAMATION_URL = https://sqlite.org/$(YEAR)/sqlite-amalgamation-$(SQLITE_VERSION).zip
+SQLITE_AMALGAMATION_PATH = deps/sqlite-amalgamation-$(SQLITE_VERSION)
 
-override CFLAGS += -Ideps/$(SQLITE_VERSION)/ext/fts5 -I$(SQLITE_AMALGAMATION_PATH) -Os -Wall -Wextra
+override CFLAGS += -I$(SQLITE_SOURCE_PATH)/ext/fts5 -I$(SQLITE_AMALGAMATION_PATH) -Os -Wall -Wextra
 CONDITIONAL_CFLAGS = -lm
 
 UNAME_S := $(shell uname -s)
@@ -32,9 +34,12 @@ clean:
 	rm -rf deps
 	rm -rf $(prefix)
 
-$(SQLITE_SRC):
-	mkdir -p deps/$(SQLITE_VERSION)
-	curl -LsS $(SQLITE_TARBALL_URL) | tar -xzf - -C deps/$(SQLITE_VERSION)/ --strip-components=1
+$(SQLITE_SOURCE_PATH):
+	@echo Downloading SQLite source...
+	curl -LsS $(SQLITE_SOURCE_URL) -o sqlite-src.zip
+	@echo Extracting SQLite source...
+	unzip -q sqlite-src.zip -d deps/
+	rm -f sqlite-src.zip
 
 $(SQLITE_AMALGAMATION_PATH):
 	@echo Downloading SQLite amalgamation...
@@ -43,11 +48,11 @@ $(SQLITE_AMALGAMATION_PATH):
 	unzip sqlite.zip -d deps/
 	rm -f sqlite.zip
 
-$(TARGET_LOADABLE): $(SQLITE_SRC) $(SQLITE_AMALGAMATION_PATH) $(prefix)
+$(TARGET_LOADABLE): $(SQLITE_SOURCE_PATH) $(SQLITE_AMALGAMATION_PATH) $(prefix)
 	$(CC) $(CFLAGS) $(CONDITIONAL_CFLAGS) -shared -fPIC -o $@ better-trigram.c
 
-$(TARGET_FTS5): $(SQLITE_SRC) $(SQLITE_AMALGAMATION_PATH) $(prefix)
-	dir=deps/$(SQLITE_VERSION) \
+$(TARGET_FTS5): $(SQLITE_SOURCE_PATH) $(SQLITE_AMALGAMATION_PATH) $(prefix)
+	dir=$(SQLITE_SOURCE_PATH) \
 	cwd=$$(pwd); \
 	lemon $$dir/ext/fts5/fts5parse.y; \
 	cd $$dir/ext/fts5; \

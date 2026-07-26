@@ -113,8 +113,7 @@ static int fts5BetterTrigramTokenize(Fts5Tokenizer *pTokenizer, void *pCtx,
                                                    int, int, int)) {
   UNUSED_PARAM(flags);
   BetterTrigramTokenizer *p = (BetterTrigramTokenizer *)pTokenizer;
-  tokenize(pText, nText, p->bFold, p->iFoldParam, pCtx, xToken);
-  return SQLITE_OK;
+  return tokenize(pText, nText, p->bFold, p->iFoldParam, pCtx, xToken);
 }
 
 static int fts5BetterTrigramInit(sqlite3 *db) {

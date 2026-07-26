@@ -1,19 +1,21 @@
 EXT = .dll
-SQLITE_VERSION = version-3.49.1
+# Prerequisites: Visual Studio Build Tools with the C++ workload.
+YEAR = 2026
+SQLITE_VERSION = 3530400
 
-SQLITE_TARBALL_URL = https://www.sqlite.org/src/tarball/sqlite.tar.gz?r=$(SQLITE_VERSION)
-SQLITE_SRC = deps\$(SQLITE_VERSION)\src
-SQLITE_AMALGAMATION_URL = https://sqlite.org/2025/sqlite-amalgamation-3490100.zip
-SQLITE_AMALGAMATION_PATH = deps/sqlite-amalgamation-3490100
+SQLITE_SOURCE_URL = https://sqlite.org/$(YEAR)/sqlite-src-$(SQLITE_VERSION).zip
+SQLITE_SOURCE_PATH = deps\sqlite-src-$(SQLITE_VERSION)
+SQLITE_AMALGAMATION_URL = https://sqlite.org/$(YEAR)/sqlite-amalgamation-$(SQLITE_VERSION).zip
+SQLITE_AMALGAMATION_PATH = deps\sqlite-amalgamation-$(SQLITE_VERSION)
 
 TCL_DOWNLOAD_URL = https://www.irontcl.com/downloads/irontcl-amd64-8.6.7.zip
 TCLSH_PATH = deps\IronTcl\bin\tclsh86t.exe
 
-CFLAGS = -I$(SQLITE_AMALGAMATION_PATH) -Ideps\$(SQLITE_VERSION)\src -Ideps\$(SQLITE_VERSION)\ext\fts5 -Os -Wall
+CFLAGS = -I$(SQLITE_AMALGAMATION_PATH) -I$(SQLITE_SOURCE_PATH)\ext\fts5 -Os -Wall
 
 prefix=dist
 $(prefix):
-	if not exist $(prefix) mkdir $(prefix)
+    if not exist $(prefix) mkdir $(prefix)
 
 TARGET_LOADABLE=$(prefix)\better-trigram$(EXT)
 TARGET_FTS5=$(prefix)\fts5$(EXT)
@@ -27,36 +29,38 @@ clean:
     if exist $(prefix) rmdir /S /Q $(prefix)
     if exist *.obj del *.obj
 
-$(SQLITE_SRC):
-    if not exist deps\$(SQLITE_VERSION) git clone --depth=1 --branch=$(SQLITE_VERSION) https://github.com/sqlite/sqlite.git deps\$(SQLITE_VERSION)
-    REM curl -LsS $(SQLITE_TARBALL_URL) | tar -xzf - -C deps\$(SQLITE_VERSION)\ --strip-components=1
+$(SQLITE_SOURCE_PATH):
+    @echo Downloading SQLite source...
+    powershell -NoProfile -Command "Invoke-WebRequest -Uri '$(SQLITE_SOURCE_URL)' -OutFile 'sqlite-src.zip'"
+    @echo Extracting SQLite source...
+    powershell -NoProfile -Command "if (-not (Test-Path 'deps')) { New-Item -ItemType Directory -Path 'deps' -Force | Out-Null }; Expand-Archive -Path 'sqlite-src.zip' -DestinationPath 'deps' -Force"
+    del sqlite-src.zip
 
 $(SQLITE_AMALGAMATION_PATH):
     @echo Downloading SQLite amalgamation...
-    powershell -Command "iwr -Uri $(SQLITE_AMALGAMATION_URL) -OutFile sqlite.zip"
+    powershell -NoProfile -Command "Invoke-WebRequest -Uri '$(SQLITE_AMALGAMATION_URL)' -OutFile 'sqlite.zip'"
     @echo Extracting SQLite amalgamation...
-    powershell -Command "Expand-Archive -Path sqlite.zip -DestinationPath deps/"
+    powershell -NoProfile -Command "if (-not (Test-Path 'deps')) { New-Item -ItemType Directory -Path 'deps' -Force | Out-Null }; Expand-Archive -Path 'sqlite.zip' -DestinationPath 'deps' -Force"
     del sqlite.zip
 
 $(TCLSH_PATH):
     @echo Downloading Tcl/Tk...
-    powershell -Command "iwr -Uri $(TCL_DOWNLOAD_URL) -OutFile tcl.zip"
+    powershell -NoProfile -Command "Invoke-WebRequest -Uri '$(TCL_DOWNLOAD_URL)' -OutFile 'tcl.zip'"
     @echo Extracting Tcl/Tk...
-    powershell -Command "Expand-Archive -Path tcl.zip -DestinationPath deps/"
+    powershell -NoProfile -Command "if (-not (Test-Path 'deps')) { New-Item -ItemType Directory -Path 'deps' -Force | Out-Null }; Expand-Archive -Path 'tcl.zip' -DestinationPath 'deps' -Force"
     del tcl.zip
 
-$(TARGET_LOADABLE): $(SQLITE_AMALGAMATION_PATH) $(SQLITE_SRC) $(prefix)
+$(TARGET_LOADABLE): $(SQLITE_SOURCE_PATH) $(SQLITE_AMALGAMATION_PATH) $(prefix)
     cl $(CFLAGS) /MT /LD /Fe$@ better-trigram.c
 
-$(TARGET_LEMON): $(SQLITE_SRC) $(prefix)
-    cl /MT deps\$(SQLITE_VERSION)\tool\lemon.c /Fe$@
-    copy deps\$(SQLITE_VERSION)\tool\lempar.c $(prefix)\lempar.c
+$(TARGET_LEMON): $(SQLITE_SOURCE_PATH) $(prefix)
+    cl /MT "$(SQLITE_SOURCE_PATH)\tool\lemon.c" /Fe$@
+    copy "$(SQLITE_SOURCE_PATH)\tool\lempar.c" "$(prefix)\lempar.c"
 
-$(TARGET_FTS5): $(TARGET_LEMON) $(TCLSH_PATH) $(SQLITE_SRC) $(SQLITE_AMALGAMATION_PATH) $(prefix)
-    $(TARGET_LEMON) deps\$(SQLITE_VERSION)\ext\fts5\fts5parse.y
-
-    powershell -Command "$$CWD = pwd; cd deps\$(SQLITE_VERSION)\ext\fts5; & $$CWD\$(TCLSH_PATH) $$CWD\deps\$(SQLITE_VERSION)\ext\fts5\tool\mkfts5c.tcl"
-    cl /DSQLITE_TEST -I$(SQLITE_AMALGAMATION_PATH) /MT /LD /Fe$(TARGET_FTS5) deps\$(SQLITE_VERSION)\ext\fts5\fts5.c
+$(TARGET_FTS5): $(TARGET_LEMON) $(TCLSH_PATH) $(SQLITE_SOURCE_PATH) $(SQLITE_AMALGAMATION_PATH) $(prefix)
+    $(TARGET_LEMON) "$(SQLITE_SOURCE_PATH)\ext\fts5\fts5parse.y"
+    powershell -NoProfile -Command "$$CWD = (Get-Location).Path; cd '$(SQLITE_SOURCE_PATH)\ext\fts5'; & \"$$CWD\$(TCLSH_PATH)\" \"$$CWD\$(SQLITE_SOURCE_PATH)\ext\fts5\tool\mkfts5c.tcl\""
+    cl /DSQLITE_TEST $(CFLAGS) /MT /LD /Fe$(TARGET_FTS5) "$(SQLITE_SOURCE_PATH)\ext\fts5\fts5.c"
 
 test: $(TARGET_FTS5) $(TARGET_LOADABLE)
     bun test

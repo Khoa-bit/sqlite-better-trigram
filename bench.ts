@@ -2,6 +2,13 @@ import { run, bench, compact, summary } from "mitata";
 import { Database } from "bun:sqlite";
 import { LoremIpsum } from "lorem-ipsum";
 
+const EXT =
+  process.platform === "win32"
+    ? ".dll"
+    : process.platform === "darwin"
+    ? ".dylib"
+    : ".so";
+
 const lorem = new LoremIpsum({
   sentencesPerParagraph: {
     max: 15,
@@ -16,7 +23,7 @@ const lorem = new LoremIpsum({
 const text = lorem.generateParagraphs(100);
 function initDatabase() {
   const db = new Database(":memory:");
-  db.loadExtension("./dist/better-trigram.so");
+  db.loadExtension(`./dist/better-trigram${EXT}`);
   return db;
 }
 const db = initDatabase();
