@@ -12,6 +12,8 @@ describe("substring search", () => {
     engine.addDocument(1, "hello world");
     engine.addDocument(2, "hello there");
     engine.addDocument(3, "goodbye world");
+    engine.addDocument(4, "a-arrow-down");
+    engine.addDocument(5, "arrow-up");
   });
 
   test("search 'hello' returns docs 1 and 2", () => {
@@ -31,6 +33,10 @@ describe("substring search", () => {
 
   test("search 'xyz' not found", () => {
     expect(engine.search("xyz")).toEqual([]);
+  });
+
+  test("search 'arrow' return 4 and 5", () => {
+    expect(engine.search("arrow")).toEqual([4, 5]);
   });
 });
 
@@ -271,11 +277,15 @@ describe("prefix search", () => {
   let engine: SearchEngine;
 
   beforeEach(() => {
-    engine = new SearchEngine({ prefixSearch: true });
+    engine = new SearchEngine({ removeDiacritics: 1, prefixSearch: true });
     engine.addDocument(1, "hello world");
     engine.addDocument(2, "hello there");
     engine.addDocument(3, "goodbye world");
     engine.addDocument(4, "hippopotamus");
+    engine.addDocument(5, "café");
+    engine.addDocument(6, "a x y");
+    engine.addDocument(7, "a-arrow-down");
+    engine.addDocument(8, "arrow-up");
   });
 
   test("1-char query 'h' matches docs with words starting with h", () => {
@@ -319,9 +329,10 @@ describe("prefix search", () => {
   });
 
   test("prefix search with diacritics", () => {
-    engine.addDocument(5, "café");
     expect(engine.search("c")).toContain(5);
     expect(engine.search("ca")).toContain(5);
+    expect(engine.search("caf")).toContain(5);
+    expect(engine.search("cafe")).toContain(5);
   });
 
   test("phrase search with all-long tokens uses position adjacency", () => {
@@ -361,9 +372,12 @@ describe("prefix search", () => {
   });
 
   test("single-char prefix in longer query still works", () => {
-    engine.addDocument(5, "a x y");
-    expect(engine.search("a")).toContain(5);
-    expect(engine.search("x")).toContain(5);
-    expect(engine.search("y")).toContain(5);
+    expect(engine.search("a")).toContain(6);
+    expect(engine.search("x")).toContain(6);
+    expect(engine.search("y")).toContain(6);
+  });
+
+  test("search 'arrow' return 7 and 8", () => {
+    expect(engine.search("arrow")).toEqual([7, 8]);
   });
 });

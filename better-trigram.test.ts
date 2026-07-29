@@ -475,7 +475,7 @@ describe("case_sensitive", () => {
         db,
         `1.1.${index + 1}`,
         `SELECT highlight(t1, 0, '(', ')') as res FROM t1(?)`,
-        [testCase[0]],
+        [testCase[0]!],
         testCase[1]
       );
     });
@@ -824,7 +824,7 @@ describe("case_sensitive", () => {
         db,
         `8.1.${index + 1}`,
         `SELECT highlight(t1, 0, '(', ')') as res FROM t1(?)`,
-        [testCase[0]],
+        [testCase[0]!],
         testCase[1]
       );
     });
@@ -847,7 +847,7 @@ describe("case_sensitive", () => {
       )
         .all()
         .forEach((result, i) => {
-          expect((result as { res: string }).res).toBe(expected[i]);
+          expect((result as { res: string }).res).toBe(expected[i]!);
         });
     });
   });
@@ -1277,6 +1277,151 @@ describe("word_boundary", () => {
     [],
     "i am (a) (cat)"
   );
+});
+
+// ──────────────────────────────────────────────
+// Two-column prefix search (app-level, no C changes)
+// ──────────────────────────────────────────────
+// Proves prefix search works with existing better_trigram tokenizer
+// by using two FTS5 columns:
+//   content  — full trigram indexing (unchanged)
+//   prefix   — app-extracted word-start prefixes (1-2 chars per word)
+//
+// The app extracts prefixes at index time:
+//   "a-arrow-down" → prefix column = "a a-"
+//   "arrow-up"     → prefix column = "a ar"
+//
+// Query routing by length avoids the JS bug where prefix tokens from
+// longer words (e.g. "a"/"ar" from "arrow") leaked into prefix index
+// and caused incorrect AND-intersection.
+describe("two-column prefix search (app-level)", () => {
+  const db = initDatabase();
+  afterAll(() => db.close());
+
+  test("0.0", () => {
+    [
+      `CREATE VIRTUAL TABLE t1 USING fts5(
+        content,
+        prefix,
+        tokenize='better_trigram'
+      );`,
+      // Doc 1: "a-arrow-down" — one word, prefixes: "a", "a-"
+      `INSERT INTO t1(content, prefix) VALUES('a-arrow-down', 'a a-')`,
+      // Doc 2: "arrow-up" — one word, prefixes: "a", "ar"
+      `INSERT INTO t1(content, prefix) VALUES('arrow-up', 'a ar')`,
+      // Doc 3: "hello world" — two words, prefixes: "h","he","w","wo"
+      `INSERT INTO t1(content, prefix) VALUES('hello world', 'h he w wo')`,
+    ].forEach((stmt) => db.query(stmt).run());
+  });
+
+  // ── 3+ char queries → trigram column ──
+
+  // 5-char query: both hyphenated docs contain trigrams "arr","rro","row"
+  sqlTest(
+    db,
+    "1. trigram: 'arrow' matches both hyphenated docs",
+    `SELECT rowid as res FROM t1 WHERE t1 MATCH 'arrow'`,
+    [],
+    [1, 2]
+  );
+
+  // 5-char query on plain words
+  sqlTest(
+    db,
+    "2. trigram: 'hello' matches doc 3",
+    `SELECT rowid as res FROM t1 WHERE t1 MATCH 'hello'`,
+    [],
+    [3]
+  );
+
+  // ── 1-2 char queries → prefix column (word-start only) ──
+
+  // 2-char "ar": doc 1 prefix is "a-", doc 2 prefix is "ar"
+  sqlTest(
+    db,
+    "3. prefix: 'ar' matches arrow-up only (word-start prefix)",
+    `SELECT rowid as res FROM t1 WHERE t1 MATCH 'ar'`,
+    [],
+    [2]
+  );
+
+  // 1-char "a": both docs have word starting with "a"
+  sqlTest(
+    db,
+    "4. prefix: 'a' matches both hyphenated docs",
+    `SELECT rowid as res FROM t1 WHERE t1 MATCH 'a'`,
+    [],
+    [1, 2]
+  );
+
+  // 2-char "he": doc 3 has "hello" starting with "he"
+  sqlTest(
+    db,
+    "5. prefix: 'he' matches hello",
+    `SELECT rowid as res FROM t1 WHERE t1 MATCH 'he'`,
+    [],
+    [3]
+  );
+
+  // 2-char "wo": doc 3 has "world" starting with "wo"
+  sqlTest(
+    db,
+    "6. prefix: 'wo' matches world",
+    `SELECT rowid as res FROM t1 WHERE t1 MATCH 'wo'`,
+    [],
+    [3]
+  );
+
+  // 1-char "h": only doc 3 (docs 1-2 have no word starting with "h")
+  sqlTest(
+    db,
+    "7. prefix: 'h' matches hello only",
+    `SELECT rowid as res FROM t1 WHERE t1 MATCH 'h'`,
+    [],
+    [3]
+  );
+
+  // 1-char "w": only doc 3
+  sqlTest(
+    db,
+    "8. prefix: 'w' matches world only",
+    `SELECT rowid as res FROM t1 WHERE t1 MATCH 'w'`,
+    [],
+    [3]
+  );
+
+  // 2-char non-matching prefix
+  sqlTest(
+    db,
+    "9. prefix: 'xy' matches nothing",
+    `SELECT rowid as res FROM t1 WHERE t1 MATCH 'xy'`,
+    [],
+    undefined
+  );
+
+  // ── Contrast with LIKE (substring, not word-start) ──
+
+  // LIKE '%ar%' on content finds both docs (substring match)
+  sqlTest(
+    db,
+    "10. LIKE: '%ar%' finds both docs (substring, not prefix)",
+    `SELECT rowid as res FROM t1 WHERE content LIKE '%ar%'`,
+    [],
+    [1, 2]
+  );
+
+  // ── Key insight ──
+  // App routes by query length. No C changes needed.
+  // Short queries < 3 chars hit prefix column (1-2 char partials).
+  // Long queries ≥ 3 chars hit content column (trigrams).
+  // FTS5 multi-column search handles both automatically.
+
+  test("11. doc with standalone 'ar' word matches in both columns", () => {
+    db.query(`INSERT INTO t1(content, prefix) VALUES('ar is a word', 'a ar')`).run();
+    const result = db.query(`SELECT rowid as res FROM t1('ar')`).all() as { res: number }[];
+    // Row 2 (arrow-up: prefix "ar") + Row 4 (standalone "ar": both columns)
+    expect(result.map(r => r.res).sort()).toEqual([2, 4]);
+  });
 });
 
 function sqlTest(

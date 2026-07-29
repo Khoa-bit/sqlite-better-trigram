@@ -1,15 +1,113 @@
 import { InvertedIndex } from "./inverted-index";
 import { TrigramTokenizer } from "./tokenizer";
 import { TokenKind, type Token, type TokenizerOptions } from "./types";
-import { fold } from "./unicode";
+import { fold, isWhitespace } from "./unicode";
 
 /**
  * High-level search engine combining tokenizer + inverted index.
  *
- * index(docId, text)    — tokenize + store
- * removeDocument(docId)
- * search(query)         — substring search with post-filter
- * searchPhrase(phrase)  — phrase search with position adjacency check
+ * ── Architecture ──
+ *
+ * Three layers:
+ *   TrigramTokenizer  →  InvertedIndex(es)  →  SearchEngine
+ *
+ * 1. **TrigramTokenizer** (src/tokenizer.ts) — char-by-char sliding window
+ *    over text. Emits 3-char trigrams. Word boundaries = whitespace + CJK
+ *    only. Hyphens, punctuation, etc. do NOT break words — they become
+ *    part of trigrams (e.g. "a-" is a valid token).
+ *
+ * 2. **InvertedIndex** (src/inverted-index.ts) —
+ *    Map<token, Map<docId, position[]>>. Each token maps to docs
+ *    containing it, with positional info for phrase search. Supports
+ *    intersect(tokens) for AND semantics and remove(docId) for cleanup.
+ *
+ * 3. **SearchEngine** — orchestrates tokenizer + one or two inverted
+ *    indexes depending on whether prefixSearch is enabled.
+ *
+ * ── Two Modes ──
+ *
+ * **Without prefixSearch** (default)
+ * ──────────────────────────────────
+ * Single trigramIndex. All tokens (trigrams + partials) go there.
+ *
+ * Query flow:
+ *   1. Tokenize query → trigram tokens
+ *   2. trigramIndex.intersect(trigrams) → candidate docIds
+ *   3. Post-filter: verify folded query appears as substring in folded
+ *      document text
+ *   4. If intersection empty, fallback to full-text scan (handles
+ *      cross-word substrings like "lo wo" in "hello world")
+ *
+ * **With prefixSearch** (enabled)
+ * ────────────────────────────────
+ * Two indexes: trigramIndex + prefixIndex. The tokenizer emits BOTH
+ * prefix tokens (1-2 char word-start markers) and trigram tokens from
+ * the same text. Prefix tokens go to prefixIndex, trigrams to trigramIndex.
+ *
+ * Purpose: enables fast single-character and two-character queries
+ * ("h", "he") via prefix index, avoiding full-text scan fallback.
+ *
+ * Example — tokenizing "arrow" with prefixSearch:
+ *   'a'  → Prefix("a")     [word start, count=1 → 1-char prefix]
+ *   'r'  → Prefix("ar")    [word start, count=2 → 2-char prefix]
+ *   'r'  → Trigram("arr")  [count=3 → full trigram, buf= "rr"]
+ *   'o'  → Trigram("rro")
+ *   'w'  → Trigram("row")
+ *   EOF  → Trigram("ow")   [flush partial]
+ *
+ * Example — tokenizing "a-arrow-down" with prefixSearch:
+ *   Prefix:  "a", "a-"
+ *   Trigram: "a-a", "-ar", "arr", "rro", "row", "ow-", "w-d",
+ *            "-do", "dow", "own"
+ *   (Hyphens don't break word boundaries, so the whole string is
+ *    one word. The 2-char prefix is "a-", not "ar".)
+ *
+ * Query routing in searchWithPrefix():
+ *   - Trigram tokens (≥3 chars) → trigram index (standard path)
+ *   - Prefix tokens at word boundary/EOF → prefix index (exact word-start)
+ *   - Prefix tokens mid-word → SKIPPED (see bug note below)
+ *   - Intersect results from both indexes (AND semantics)
+ *
+ * ── Important: Mid-word Prefix Artifacts ──
+ *
+ * When a query word is 3+ characters (e.g. "arrow"), the tokenizer emits
+ * prefix tokens "a" and "ar" followed by trigrams "arr", "rro", "row".
+ * The prefix tokens "a" and "ar" are **artifacts** — they represent the
+ * first 1-2 chars of a longer word, not independent short search terms.
+ *
+ * These artifacts must NOT be sent to the prefix index as independent
+ * filters. Consider:
+ *   Doc 5: "a-arrow-down" → Prefix("a"), Prefix("a-"), ...
+ *   Doc 6: "arrow-up"    → Prefix("a"), Prefix("ar"), ...
+ *
+ * Query "arrow" → prefix tokens "a", "ar":
+ *   prefixIndex.intersect(["a", "ar"]) = [6]  (doc 5 excluded:
+ *   its 2-char prefix is "a-" not "ar")
+ *   trigramIndex.intersect(["arr","rro","row"]) = [5, 6]
+ *   Intersection = [6]  ← WRONG, should be [5, 6]
+ *
+ * Fix: skip prefix tokens whose next character in the query is
+ * non-whitespace (mid-word). Only genuine 1-2 char query words
+ * (at whitespace/EOF) reach the prefix index.
+ *
+ * ── Substring vs. Prefix Semantics ──
+ *
+ * The prefix index stores ONLY word-start prefixes. Searching for "ar"
+ * in prefix index means "documents with a word starting with 'ar'".
+ * This is different from trigram substring search where "ar" matches
+ * anywhere in a word. This intentional tradeoff means 1-2 char queries
+ * using prefixSearch are word-start-only, not arbitrary substrings.
+ *
+ * ── Phrase Search ──
+ *
+ * searchPhrase() verifies that phrase tokens appear at consecutive
+ * positions in the document. Uses iterative candidate-set narrowing:
+ * start with positions of first token, keep only positions where
+ * each subsequent token is at prev_position + 1.
+ *
+ * With prefixSearch, if any token is < 3 chars (a genuinely short word),
+ * phrase search falls back to substring search because prefix tokens
+ * lack the ordered position data needed for adjacency checks.
  */
 export class SearchEngine {
   readonly tokenizer: TrigramTokenizer;
@@ -93,27 +191,47 @@ export class SearchEngine {
     }
 
     // Fallback: full-text scan when index can't handle query
-    // (e.g. cross-word-boundary substrings like "lo wo" in "hello world")
-    return this.trigramIndex.getAllDocIds().filter((docId) => {
-      const doc = this.trigramIndex.getFoldedDoc(docId);
-      return (
-        doc !== undefined &&
-        doc.includes(foldedQuery)
-      );
-    });
+    // (e.g. cross-word-boundary substrings like "lo wo" in "hello world").
+    //
+    // With prefixSearch: if no token has postings, it's a certain miss.
+    // Without prefixSearch: always try the scan (short queries like "he"
+    // have no trigram postings but may still match via substring scan).
+    if (!this.prefixIndex || this.trigramIndex.hasAnyPosting(tokenTexts)) {
+      return this.trigramIndex.getAllDocIds().filter((docId) => {
+        const doc = this.trigramIndex.getFoldedDoc(docId);
+        return (
+          doc !== undefined &&
+          doc.includes(foldedQuery)
+        );
+      });
+    }
+    return [];
   }
 
   /**
    * Search with dual-index routing (prefixSearch enabled).
-   * Tokens < 3 chars → prefix index. Tokens ≥ 3 chars → trigram index.
+   *
+   * Tokens are routed to either prefixIndex or trigramIndex depending on
+   * kind and length. Critically, prefix tokens that are mid-word artifacts
+   * (e.g. "a" from "arrow") are SKIPPED — they come from the first 1-2
+   * chars of a 3+ char word and would produce incorrect intersection
+   * results when the document's prefix differs (e.g. "a-arrow-down" has
+   * prefix "a-" not "ar").
+   *
+   * Routing rules:
+   *   - Trigram tokens (≥3 chars) → trigram index (standard path)
+   *   - Prefix tokens at word boundary/EOF → prefix index (exact word-start)
+   *   - Prefix tokens mid-word → SKIP (artifacts of longer words)
+   *   - Partial trigram tokens (<3 chars, EOF flush) → prefix index
    *
    * Post-filter is skipped for prefix-index results because the prefix
    * index is already exact (word-starts only). For mixed queries the
    * intersection of prefix + trigram results is likewise correct.
    *
-   * For single-token queries that went through the trigram path and
-   * returned nothing, fall back to full-text scan (handles cross-word
-   * substrings like "lo wo").
+   * When all tokens route to trigram index (no genuine short tokens),
+   * delegates to searchWithTrigram for standard trigram + post-filter.
+   *
+   * Full-text scan fallback handles cross-word substrings like "lo wo".
    */
   private searchWithPrefix(query: string, queryTokens: Token[]): number[] {
     const shortTokens: string[] = [];
@@ -121,6 +239,13 @@ export class SearchEngine {
     let hasShort = false;
 
     for (const t of queryTokens) {
+      // Skip prefix tokens that fall mid-word in the query — they are
+      // artifacts of tokenizing a longer word (e.g. "a" from "arrow").
+      // Only genuine short-word prefixes (at whitespace or EOF) are used.
+      if (t.kind === TokenKind.Prefix && this.isMidWordPrefix(query, t)) {
+        continue;
+      }
+      // Route by token kind: trigrams → trigram index, prefixes → prefix index
       if (t.text.length < 3) {
         shortTokens.push(t.text);
         hasShort = true;
@@ -159,14 +284,33 @@ export class SearchEngine {
     if (candidates.length > 0) return candidates;
 
     // Full-text scan fallback for cross-word substrings.
-    const foldedQuery = fold(query, this.tokenizer.options);
-    return this.trigramIndex.getAllDocIds().filter((docId) => {
-      const doc = this.trigramIndex.getFoldedDoc(docId);
-      return (
-        doc !== undefined &&
-        doc.includes(foldedQuery)
-      );
-    });
+    // Only if at least one token has postings — otherwise it's a certain miss.
+    if (this.trigramIndex.hasAnyPosting(longTokens) || this.prefixIndex?.hasAnyPosting(shortTokens)) {
+      const foldedQuery = fold(query, this.tokenizer.options);
+      return this.trigramIndex.getAllDocIds().filter((docId) => {
+        const doc = this.trigramIndex.getFoldedDoc(docId);
+        return (
+          doc !== undefined &&
+          doc.includes(foldedQuery)
+        );
+      });
+    }
+    return [];
+  }
+
+  /**
+   * Check if a prefix token is mid-word in the query, i.e. the next
+   * character after the prefix is non-whitespace and exists.
+   *
+   * Mid-word prefix tokens are artifacts of tokenizing longer words.
+   * For example, query "arrow" produces Prefix("a") and Prefix("ar"),
+   * but both fall mid-word (next chars "r", "r") → they are skipped.
+   * In contrast, query "h wo" produces Prefix("h") at endOffset=1
+   * where query[1] = ' ' → not mid-word → used for prefix lookup.
+   */
+  private isMidWordPrefix(query: string, token: Token): boolean {
+    const nextChar = query[token.endOffset];
+    return nextChar !== undefined && !isWhitespace(nextChar.codePointAt(0)!);
   }
 
   // ── Phrase search ──

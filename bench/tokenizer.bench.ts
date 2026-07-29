@@ -14,8 +14,8 @@ const EXT =
   process.platform === "win32"
     ? ".dll"
     : process.platform === "darwin"
-    ? ".dylib"
-    : ".so";
+      ? ".dylib"
+      : ".so";
 
 // ══════════════════════════════════════════
 // Test data
@@ -48,14 +48,54 @@ const cjkText = [
 ].join("\n");
 
 const shortQueries = [
-  "hello", "world", "lorem", "ipsum", "dolor", "bir", "ird",
-  "con đường", "tørv", "łódź", "đẹp", "café", "résumé",
-  "苹果", "那是", "日本語", "ｶﾀｶﾅ", "hello world",
-  "the quick brown", "xyzzy", "notfound", "lo wo",
+  "hello",
+  "world",
+  "lorem",
+  "ipsum",
+  "dolor",
+  "bir",
+  "ird",
+  "con đường",
+  "tørv",
+  "łódź",
+  "đẹp",
+  "café",
+  "résumé",
+  "苹果",
+  "那是",
+  "日本語",
+  "ｶﾀｶﾅ",
+  "hello world",
+  "the quick brown",
+  "xyzzy",
+  "notfound",
+  "lo wo",
+  // ── matches englishText ──
+  "consectetur",
+  "adipiscing",
+  // ── matches diacriticText (folded) ──
+  "duong",
+  "naive",
+  "istanbul",
+  "creme",
+  "sens",
+  // ── matches cjkText ──
+  "世界",
+  "你好",
+  "李红",
+  // ── matches diacriticText (jp/kr) ──
+  "こんにちは",
+  "안녕하세요",
+  // ── misses all ──
+  "qwerty",
+  "東京",
+  "zzzzz",
 ];
 
 const PREFIX_OPTIONS: TokenizerOptions = {
-  removeDiacritics: 1, caseSensitive: false, prefixSearch: true,
+  removeDiacritics: 1,
+  caseSensitive: false,
+  prefixSearch: true,
 };
 
 // ══════════════════════════════════════════
@@ -75,8 +115,16 @@ const indexDocs = englishText
 
 function buildSearchEngine(): SearchEngine {
   const engine = new SearchEngine(OPTIONS);
-  for (let i = 0; i < indexDocs.length; i++) {
-    engine.addDocument(i, indexDocs[i]!);
+  let idx = 0;
+  for (; idx < indexDocs.length; idx++) {
+    engine.addDocument(idx, indexDocs[idx]!);
+  }
+  engine.addDocument(idx++, englishText);
+  for (; idx < diacriticText.length; idx++) {
+    engine.addDocument(idx, diacriticText[idx]!);
+  }
+  for (; idx < cjkText.length; idx++) {
+    engine.addDocument(idx, cjkText[idx]!);
   }
   return engine;
 }
@@ -85,8 +133,16 @@ const searchEngine = buildSearchEngine();
 
 function buildPrefixSearchEngine(): SearchEngine {
   const engine = new SearchEngine(PREFIX_OPTIONS);
-  for (let i = 0; i < indexDocs.length; i++) {
-    engine.addDocument(i, indexDocs[i]!);
+  let idx = 0;
+  for (; idx < indexDocs.length; idx++) {
+    engine.addDocument(idx, indexDocs[idx]!);
+  }
+  engine.addDocument(idx++, englishText);
+  for (; idx < diacriticText.length; idx++) {
+    engine.addDocument(idx, diacriticText[idx]!);
+  }
+  for (; idx < cjkText.length; idx++) {
+    engine.addDocument(idx, cjkText[idx]!);
   }
   return engine;
 }
@@ -106,7 +162,15 @@ function computeWordPrefixes(text: string): string {
   for (const char of text) {
     const cp = char.codePointAt(0)!;
     if (cp === 0) continue;
-    const isSpace = cp === 0x09 || cp === 0x0a || cp === 0x0b || cp === 0x0c || cp === 0x0d || cp === 0x20 || cp === 0x85 || cp === 0xa0;
+    const isSpace =
+      cp === 0x09 ||
+      cp === 0x0a ||
+      cp === 0x0b ||
+      cp === 0x0c ||
+      cp === 0x0d ||
+      cp === 0x20 ||
+      cp === 0x85 ||
+      cp === 0xa0;
     if (isSpace) {
       if (word.length > 0) {
         if (word.length >= 1) result.push(word[0]!);
@@ -161,14 +225,10 @@ try {
     cPrefixInsert(indexDocs[i]!, prefixes);
   }
 
-  const ps1 = db.query(
-    `SELECT rowid FROM bt_prefix WHERE prefixes MATCH 'h'`,
-  );
+  const ps1 = db.query(`SELECT rowid FROM bt_prefix WHERE prefixes MATCH 'h'`);
   cPrefixSearch1 = (q: string) => ps1.all(q);
 
-  const ps2 = db.query(
-    `SELECT rowid FROM bt_prefix WHERE prefixes MATCH 'he'`,
-  );
+  const ps2 = db.query(`SELECT rowid FROM bt_prefix WHERE prefixes MATCH 'he'`);
   cPrefixSearch2 = (q: string) => ps2.all(q);
 
   const ts = db.query(
@@ -217,10 +277,7 @@ compact(() => {
 compact(() => {
   summary(() => {
     bench("index 20 documents", () => {
-      const e = new SearchEngine(OPTIONS);
-      for (let i = 0; i < indexDocs.length; i++) {
-        e.addDocument(i, indexDocs[i]!);
-      }
+      buildSearchEngine();
     });
 
     bench("substring search hit", () => {
@@ -239,11 +296,14 @@ compact(() => {
       searchEngine.searchPhrase("lorem ipsum");
     });
 
-    bench("index 20 docs (prefixSearch)", () => {
-      const e = new SearchEngine(PREFIX_OPTIONS);
-      for (let i = 0; i < indexDocs.length; i++) {
-        e.addDocument(i, indexDocs[i]!);
+    bench("short queries", () => {
+      for (const q of shortQueries) {
+        searchEngine.searchPhrase(q);
       }
+    });
+
+    bench("index 20 docs (prefixSearch)", () => {
+      buildPrefixSearchEngine();
     });
 
     bench("search prefix 1-char", () => {
@@ -264,6 +324,12 @@ compact(() => {
 
     bench("phrase search (prefixSearch)", () => {
       prefixSearchEngine.searchPhrase("lorem ipsum");
+    });
+
+    bench("short queries (prefixSearch)", () => {
+      for (const q of shortQueries) {
+        prefixSearchEngine.searchPhrase(q);
+      }
     });
   });
 });
