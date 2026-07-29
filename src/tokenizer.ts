@@ -25,7 +25,9 @@ export class TrigramTokenizer {
    * - Case folding per-char; diacritic removal on final token text
    */
   tokenize(text: string): Token[] {
-    const estimatedTokens = Math.ceil(text.length / 2);
+    const estimatedTokens = this.options.prefixSearch
+      ? Math.ceil(text.length / 2)
+      : Math.ceil(text.length / 3) + 1;
     const result: Token[] = new Array(estimatedTokens);
     let resultIdx = 0;
     const buf: string[] = new Array(3);

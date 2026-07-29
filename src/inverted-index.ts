@@ -12,23 +12,25 @@ export class InvertedIndex {
   private postings = new Map<string, Map<number, number[]>>();
   private docs = new Map<number, string>();
   private foldedDocs = new Map<number, string>();
-  private docTokens = new Map<number, Set<string>>();
+  private docTokens = new Map<number, Record<string, true>>();
+  private cachedAllDocIds: number[] | null = null;
 
   // ── Mutation ──
 
   add(docId: number, tokens: Token[], originalText: string, foldedText?: string): void {
     this.docs.set(docId, originalText);
     this.foldedDocs.set(docId, foldedText ?? originalText);
+    this.cachedAllDocIds = null;
 
     let tokenSet = this.docTokens.get(docId);
     if (!tokenSet) {
-      tokenSet = new Set();
+      tokenSet = {};
       this.docTokens.set(docId, tokenSet);
     }
 
     for (let pos = 0; pos < tokens.length; pos++) {
       const token = tokens[pos]!.text;
-      tokenSet.add(token);
+      tokenSet[token] = true;
 
       let docMap = this.postings.get(token);
       if (!docMap) {
@@ -47,7 +49,7 @@ export class InvertedIndex {
   remove(docId: number): void {
     const tokens = this.docTokens.get(docId);
     if (tokens) {
-      for (const token of tokens) {
+      for (const token of Object.keys(tokens)) {
         const docMap = this.postings.get(token);
         if (docMap) {
           docMap.delete(docId);
@@ -60,6 +62,7 @@ export class InvertedIndex {
     this.docTokens.delete(docId);
     this.docs.delete(docId);
     this.foldedDocs.delete(docId);
+    this.cachedAllDocIds = null;
   }
 
   clear(): void {
@@ -67,6 +70,7 @@ export class InvertedIndex {
     this.docs.clear();
     this.foldedDocs.clear();
     this.docTokens.clear();
+    this.cachedAllDocIds = null;
   }
 
   // ── Query ──
@@ -83,9 +87,20 @@ export class InvertedIndex {
     return this.foldedDocs.get(docId);
   }
 
+  /** Returns true if at least one of the given tokens has a posting list. */
+  hasAnyPosting(tokens: string[]): boolean {
+    for (const t of tokens) {
+      if (this.postings.has(t)) return true;
+    }
+    return false;
+  }
+
   /** All doc IDs — used for fallback full-text scan. */
   getAllDocIds(): number[] {
-    return Array.from(this.docs.keys());
+    if (this.cachedAllDocIds === null) {
+      this.cachedAllDocIds = Array.from(this.docs.keys());
+    }
+    return this.cachedAllDocIds;
   }
 
   /**

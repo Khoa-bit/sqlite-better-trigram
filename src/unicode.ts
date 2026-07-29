@@ -36,6 +36,8 @@ const CJK_RANGES: readonly [number, number][] = [
 ];
 
 export function isCJK(codepoint: number): boolean {
+  // Fast-path: ASCII and common non-CJK scripts start well below CJK ranges
+  if (codepoint < 0x2e80) return false;
   for (const [lo, hi] of CJK_RANGES) {
     if (codepoint < lo) break;
     if (codepoint <= hi) return true;
