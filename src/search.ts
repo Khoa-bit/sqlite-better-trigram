@@ -146,6 +146,12 @@ export class SearchEngine {
     this.prefixIndex?.remove(docId);
   }
 
+  /** Empty the index so it can be repopulated from scratch. */
+  clear(): void {
+    this.trigramIndex.clear();
+    this.prefixIndex?.clear();
+  }
+
   // ── Substring search ──
 
   /**

@@ -165,6 +165,12 @@ export class TieredSearch {
     this.docs.delete(docId);
   }
 
+  /** Empty every index and drop stored fields so it can be repopulated. */
+  clear(): void {
+    for (const { engine } of this.indexGroups) engine.clear();
+    this.docs.clear();
+  }
+
   // ── Query ──
 
   /** Documents ranked by tier (ascending), then docId. Tier 0 is dropped. */
