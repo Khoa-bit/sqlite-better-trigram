@@ -30,8 +30,6 @@ clean-all: clean
 clean:
     if exist $(prefix) rmdir /S /Q $(prefix)
     if exist *.obj del *.obj
-    if exist fold-table.h del fold-table.h
-    if exist fold-diacritic-table.h del fold-diacritic-table.h
 
 $(SQLITE_SOURCE_PATH):
     @echo Downloading SQLite source...
@@ -54,15 +52,8 @@ $(TCLSH_PATH):
     powershell -NoProfile -Command "if (-not (Test-Path 'deps')) { New-Item -ItemType Directory -Path 'deps' -Force | Out-Null }; Expand-Archive -Path 'tcl.zip' -DestinationPath 'deps' -Force"
     del tcl.zip
 
-FOLD_TABLES = fold-table.h fold-diacritic-table.h
-
-$(TARGET_LOADABLE): $(SQLITE_SOURCE_PATH) $(SQLITE_AMALGAMATION_PATH) $(FOLD_TABLES) $(prefix)
+$(TARGET_LOADABLE): better-trigram.c better-trigram.h tokenizer.c $(SQLITE_SOURCE_PATH) $(SQLITE_AMALGAMATION_PATH) $(prefix)
     cl $(CFLAGS) /MT /LD /Fe$@ better-trigram.c
-
-$(FOLD_TABLES): gen-fold-table.c $(SQLITE_SOURCE_PATH)
-    cl $(CFLAGS) gen-fold-table.c
-    gen-fold-table.exe
-    del gen-fold-table.exe gen-fold-table.obj
 
 $(TARGET_LEMON): $(SQLITE_SOURCE_PATH) $(prefix)
     cl /MT "$(SQLITE_SOURCE_PATH)\tool\lemon.c" /Fe$@

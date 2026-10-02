@@ -177,12 +177,17 @@ describe("diacritic removal", () => {
     expect(t.tokenize("łódź").map((x) => x.text)).toEqual(["lod", "odz"]);
   });
 
-  test("Æther → ath (Æ→a)", () => {
-    expect(t.tokenize("Æther").map((x) => x.text)).toEqual(["ath", "the", "her"]);
+  test("Æther → aether (Æ→ae, expands)", () => {
+    expect(t.tokenize("Æther").map((x) => x.text)).toEqual([
+      "aet",
+      "eth",
+      "the",
+      "her",
+    ]);
   });
 
-  test("æon → aon (æ→a)", () => {
-    expect(t.tokenize("æon").map((x) => x.text)).toEqual(["aon"]);
+  test("æon → aeon (æ→ae, expands)", () => {
+    expect(t.tokenize("æon").map((x) => x.text)).toEqual(["aeo", "eon"]);
   });
 
   test("Ðe → de (Ð→d)", () => {
@@ -205,22 +210,67 @@ describe("diacritic removal", () => {
     expect(t.tokenize("İzmir").map((x) => x.text)).toEqual(["izm", "zmi", "mir"]);
   });
 
-  test("Œuvre → ouv (Œ→o)", () => {
-    expect(t.tokenize("Œuvre").map((x) => x.text)).toEqual(["ouv", "uvr", "vre"]);
+  test("Œuvre → oeuvre (Œ→oe, expands)", () => {
+    expect(t.tokenize("Œuvre").map((x) => x.text)).toEqual([
+      "oeu",
+      "euv",
+      "uvr",
+      "vre",
+    ]);
   });
 
-  test("œuvre → ouv (œ→o)", () => {
-    expect(t.tokenize("œuvre").map((x) => x.text)).toEqual(["ouv", "uvr", "vre"]);
+  test("œuvre → oeuvre (œ→oe, expands)", () => {
+    expect(t.tokenize("œuvre").map((x) => x.text)).toEqual([
+      "oeu",
+      "euv",
+      "uvr",
+      "vre",
+    ]);
+  });
+
+  test("Straße → strasse (ß→ss, expands)", () => {
+    expect(t.tokenize("Straße").map((x) => x.text)).toEqual([
+      "str",
+      "tra",
+      "ras",
+      "ass",
+      "sse",
+    ]);
+  });
+
+  test("ﬁn → fin, ﬁab → fia/iab (ﬁ→fi; trigrams stay 3 wide)", () => {
+    expect(t.tokenize("ﬁn").map((x) => x.text)).toEqual(["fin"]);
+    expect(t.tokenize("ﬁab").map((x) => x.text)).toEqual(["fia", "iab"]);
+  });
+
+  test("expansion also grows prefix tokens", () => {
+    const tp = new TrigramTokenizer({ removeDiacritics: 1, prefixSearch: true });
+    expect(tp.tokenize("ßab").map((x) => x.text)).toEqual([
+      "s",
+      "ss",
+      "ssa",
+      "sab",
+    ]);
   });
 
   test("works with level 2", () => {
     const t2 = new TrigramTokenizer({ removeDiacritics: 2 });
     expect(t2.tokenize("tørv").map((x) => x.text)).toEqual(["tor", "orv"]);
     expect(t2.tokenize("alı").map((x) => x.text)).toEqual(["ali"]);
-    expect(t2.tokenize("Æther").map((x) => x.text)).toEqual(["ath", "the", "her"]);
+    expect(t2.tokenize("Æther").map((x) => x.text)).toEqual([
+      "aet",
+      "eth",
+      "the",
+      "her",
+    ]);
     expect(t2.tokenize("Þorn").map((x) => x.text)).toEqual(["tor", "orn"]);
     expect(t2.tokenize("İzmir").map((x) => x.text)).toEqual(["izm", "zmi", "mir"]);
-    expect(t2.tokenize("Œuvre").map((x) => x.text)).toEqual(["ouv", "uvr", "vre"]);
+    expect(t2.tokenize("Œuvre").map((x) => x.text)).toEqual([
+      "oeu",
+      "euv",
+      "uvr",
+      "vre",
+    ]);
   });
 });
 

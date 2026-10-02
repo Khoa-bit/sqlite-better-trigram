@@ -259,193 +259,10 @@ describe("remove_diacritics", () => {
   });
 });
 
-// ──────────────────────────────────────────────
-// Custom diacritic patch chars
-// ──────────────────────────────────────────────
-describe("custom diacritic patch", () => {
-  const db = initDatabase();
-  afterAll(() => db.close());
-
-  test("0.0", () => {
-    [
-      `CREATE VIRTUAL TABLE t0 USING fts5(y, tokenize='better_trigram remove_diacritics 1');`,
-      // ø→o, đ→d, ħ→h, ı→i, ł→l, ư→u via NFD
-      `INSERT INTO t0 VALUES('tørv er godt')`,
-      `INSERT INTO t0 VALUES('đức tính tốt')`,
-      `INSERT INTO t0 VALUES('ħaba ma sens')`,
-      `INSERT INTO t0 VALUES('bu alıntıdır')`,
-      `INSERT INTO t0 VALUES('łódź jest super')`,
-      `INSERT INTO t0 VALUES('cửa sổ mới')`,
-      `INSERT INTO t0 VALUES('Đại dương xanh thẳm')`,
-    ].forEach((stmt) => db.query(stmt).run());
-  });
-
-  // ── MATCH search ──
-
-  sqlTest(
-    db,
-    "0.1",
-    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('tor')`,
-    [],
-    "(tør)v er godt"
-  );
-
-  sqlTest(
-    db,
-    "0.2",
-    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('duc')`,
-    [],
-    "(đức) tính tốt"
-  );
-
-  sqlTest(
-    db,
-    "0.3",
-    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('hab')`,
-    [],
-    "(ħab)a ma sens"
-  );
-
-  sqlTest(
-    db,
-    "0.4",
-    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('ali')`,
-    [],
-    "bu (alı)ntıdır"
-  );
-
-  sqlTest(
-    db,
-    "0.5",
-    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('lod')`,
-    [],
-    "(łód)ź jest super"
-  );
-
-  sqlTest(
-    db,
-    "0.6",
-    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('moi')`,
-    [],
-    "cửa sổ (mới)"
-  );
-
-  sqlTest(
-    db,
-    "0.7",
-    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('dai')`,
-    [],
-    "(Đại) dương xanh thẳm"
-  );
-
-  // ── original diacritics also match ──
-
-  sqlTest(
-    db,
-    "0.8",
-    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('tørv')`,
-    [],
-    "(tørv) er godt"
-  );
-
-  sqlTest(
-    db,
-    "0.9",
-    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('łódź')`,
-    [],
-    "(łódź) jest super"
-  );
-
-  sqlTest(
-    db,
-    "0.10",
-    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('đức')`,
-    [],
-    "(đức) tính tốt"
-  );
-
-  // ── case-insensitive: uppercase query matches folded text ──
-
-  sqlTest(
-    db,
-    "0.11",
-    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('TOR')`,
-    [],
-    "(tør)v er godt"
-  );
-
-  sqlTest(
-    db,
-    "0.12",
-    `SELECT highlight(t0, 0, '(', ')') as res FROM t0('DAI')`,
-    [],
-    "(Đại) dương xanh thẳm"
-  );
-
-  // ── LIKE with original diacritics (byte-level, uses trigram index) ──
-
-  sqlTest(db, "0.13", `SELECT rowid as res FROM t0 WHERE y LIKE '%tørv%'`, [], 1);
-  sqlTest(db, "0.14", `SELECT rowid as res FROM t0 WHERE y LIKE '%łódź%'`, [], 5);
-  sqlTest(db, "0.15", `SELECT rowid as res FROM t0 WHERE y LIKE '%Đại%'`, [], 7);
-
-  // ── remove_diacritics 2 ──
-
-  describe("level 2", () => {
-    const db2 = initDatabase();
-    afterAll(() => db2.close());
-
-    test("1.0", () => {
-      [
-        `CREATE VIRTUAL TABLE t1 USING fts5(y, tokenize='better_trigram remove_diacritics 2');`,
-        `INSERT INTO t1 VALUES('tørv er godt')`,
-        `INSERT INTO t1 VALUES('ħaba ma sens')`,
-        `INSERT INTO t1 VALUES('bu alıntıdır')`,
-        `INSERT INTO t1 VALUES('łódź jest super')`,
-        `INSERT INTO t1 VALUES('Đại dương xanh thẳm')`,
-      ].forEach((stmt) => db2.query(stmt).run());
-    });
-
-    sqlTest(
-      db2,
-      "1.1",
-      `SELECT highlight(t1, 0, '(', ')') as res FROM t1('tor')`,
-      [],
-      "(tør)v er godt"
-    );
-
-    sqlTest(
-      db2,
-      "1.2",
-      `SELECT highlight(t1, 0, '(', ')') as res FROM t1('hab')`,
-      [],
-      "(ħab)a ma sens"
-    );
-
-    sqlTest(
-      db2,
-      "1.3",
-      `SELECT highlight(t1, 0, '(', ')') as res FROM t1('ali')`,
-      [],
-      "bu (alı)ntıdır"
-    );
-
-    sqlTest(
-      db2,
-      "1.4",
-      `SELECT highlight(t1, 0, '(', ')') as res FROM t1('lod')`,
-      [],
-      "(łód)ź jest super"
-    );
-
-    sqlTest(
-      db2,
-      "1.5",
-      `SELECT highlight(t1, 0, '(', ')') as res FROM t1('dai')`,
-      [],
-      "(Đại) dương xanh thẳm"
-    );
-  });
-});
+// The custom diacritic patch (ø→o, đ→d, ħ→h, ı→i, ł→l, Æ→a, Þ→t, œ→o, ...)
+// was removed from the extension. Those mappings now live app-side in the JS
+// fold (src/unicode.ts) and are covered by test/tokenizer.test.ts. The
+// extension's remove_diacritics only strips combining-mark diacritics.
 
 describe("case_sensitive", () => {
   describe("v1", () => {
@@ -1155,23 +972,11 @@ describe("cjk", () => {
       ].forEach((stmt) => db.query(stmt).run());
     });
 
-    // remove_diacritics 2: đ→d, ườ→uo — "duong" matches "đường"
-    sqlTest(
-      db,
-      `3.1`,
-      `SELECT highlight(t3, 0, '(', ')') as res FROM t3('duong');`,
-      [],
-      ["Con (đường) dài và đẹp"]
-    );
-
-    // "dep" matches "đẹp" (đ→d, ẹ→e)
-    sqlTest(
-      db,
-      `3.2`,
-      `SELECT highlight(t3, 0, '(', ')') as res FROM t3('dep');`,
-      [],
-      ["Con đường dài và (đẹp)"]
-    );
+    // NOTE: standalone stroke letters like đ (U+0111) are no longer folded by
+    // the extension — the custom patch was removed and now lives app-side in
+    // the JS fold (src/unicode.ts). Only combining-mark diacritics are stripped
+    // here, so "duong"/"dep" no longer match. See sql-js-parity.test.ts for the
+    // app-side folding scheme that does handle them.
 
     // "tieng viet" matches "Tiếng Việt" (FTS5 AND semantics)
     sqlTest(
@@ -1395,6 +1200,36 @@ describe("two-column prefix search (app-level)", () => {
     db,
     "9. prefix: 'xy' matches nothing",
     `SELECT rowid as res FROM t1 WHERE t1 MATCH 'xy'`,
+    [],
+    undefined
+  );
+
+  // ── Multi-word prefix queries (FTS5 implicit AND) ──
+
+  // "h w": doc 3 needs both a word starting with "h" AND a word
+  // starting with "w" → "hello world". Docs 1-2 lack both.
+  sqlTest(
+    db,
+    "9a. prefix: 'h w' matches hello world (both word-starts)",
+    `SELECT rowid as res FROM t1 WHERE t1 MATCH 'h w'`,
+    [],
+    [3]
+  );
+
+  // "he wo": same doc must satisfy both prefixes
+  sqlTest(
+    db,
+    "9b. prefix: 'he wo' matches hello world (both word-starts)",
+    `SELECT rowid as res FROM t1 WHERE t1 MATCH 'he wo'`,
+    [],
+    [3]
+  );
+
+  // "h ar": "h" (doc 3 only) AND "ar" (doc 2 only) → no doc has both
+  sqlTest(
+    db,
+    "9c. prefix: 'h ar' matches nothing (no doc has both word-starts)",
+    `SELECT rowid as res FROM t1 WHERE t1 MATCH 'h ar'`,
     [],
     undefined
   );

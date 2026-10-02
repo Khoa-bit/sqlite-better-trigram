@@ -6,7 +6,7 @@
   "types": "./src/index.ts",
   "description": "Pure TypeScript trigram tokenizer + search engine port of sqlite-better-trigram",
   "scripts": {
-    "build": "bun build --outdir=dist/js --minify --sourcemap=linked ./src/index.ts && tsc --project tsconfig.build.json",
+    "build": "bun build --outdir=dist/js --minify --sourcemap=linked ./src/index.ts && tsc --project tsconfig.json",
     "test": "bun test",
     "bench": "bun run bench/tokenizer.bench.ts && bun run better-trigram.bench.ts",
     "typecheck": "tsc --noEmit"

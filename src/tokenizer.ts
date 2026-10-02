@@ -38,6 +38,16 @@ export class TrigramTokenizer {
     let atWordStart = true;
     let offset = 0;
 
+    /** Emit and rotate the ring buffer once it holds a full trigram. */
+    const emitTrigramIfFull = (endOffset: number): void => {
+      if (count !== 3) return;
+      result[resultIdx++] = this.emitToken(buf, starts, bufStart, 3, endOffset);
+      bufStart = (bufStart + 1) % 3;
+      count = 2;
+      isPartial = true;
+      atWordStart = false;
+    };
+
     for (const char of text) {
       const codepoint = char.codePointAt(0)!;
       const charLen = char.length;
@@ -52,13 +62,8 @@ export class TrigramTokenizer {
       const isCjk = isCJK(codepoint);
 
       // ── Emit full trigram if buffer full ──
-      if (count === 3) {
-        result[resultIdx++] = this.emitToken(buf, starts, bufStart, 3, startOff);
-        bufStart = (bufStart + 1) % 3;
-        count = 2;
-        isPartial = true;
-        atWordStart = false;
-      }
+      // Also runs on a word boundary so the last trigram is not dropped.
+      emitTrigramIfFull(startOff);
 
       // ── Word boundaries ──
       if (isSpace || isCjk) {
@@ -84,27 +89,34 @@ export class TrigramTokenizer {
         continue;
       }
 
-      // ── Add char to trigram buffer ──
-      starts[(bufStart + count) % 3] = startOff;
-      buf[(bufStart + count) % 3] = foldedChar;
-      count++;
+      // ── Add char(s) to the trigram buffer ──
+      // A folded char may expand to several codepoints (e.g. ß → "ss", ﬁ → "fi").
+      // Each output codepoint takes its own slot so trigrams stay exactly three
+      // codepoints wide; all of them inherit the source character's offsets.
+      for (const out of foldedChar) {
+        emitTrigramIfFull(startOff);
 
-      // ── Emit 1-char and 2-char prefix tokens at word start ──
-      if (this.options.prefixSearch && atWordStart) {
-        if (count === 1) {
-          result[resultIdx++] = {
-            text: buf[(bufStart + 0) % 3]!,
-            startOffset: starts[(bufStart + 0) % 3]!,
-            endOffset: offset,
-            kind: TokenKind.Prefix,
-          };
-        } else if (count === 2) {
-          result[resultIdx++] = {
-            text: buf[(bufStart + 0) % 3]! + buf[(bufStart + 1) % 3]!,
-            startOffset: starts[(bufStart + 0) % 3]!,
-            endOffset: offset,
-            kind: TokenKind.Prefix,
-          };
+        starts[(bufStart + count) % 3] = startOff;
+        buf[(bufStart + count) % 3] = out;
+        count++;
+
+        // ── Emit 1-char and 2-char prefix tokens at word start ──
+        if (this.options.prefixSearch && atWordStart) {
+          if (count === 1) {
+            result[resultIdx++] = {
+              text: buf[(bufStart + 0) % 3]!,
+              startOffset: starts[(bufStart + 0) % 3]!,
+              endOffset: offset,
+              kind: TokenKind.Prefix,
+            };
+          } else if (count === 2) {
+            result[resultIdx++] = {
+              text: buf[(bufStart + 0) % 3]! + buf[(bufStart + 1) % 3]!,
+              startOffset: starts[(bufStart + 0) % 3]!,
+              endOffset: offset,
+              kind: TokenKind.Prefix,
+            };
+          }
         }
       }
     }

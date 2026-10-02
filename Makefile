@@ -36,7 +36,6 @@ clean-all: clean
 clean:
 	rm -rf deps
 	rm -rf $(prefix)
-	rm -f fold-table.h fold-diacritic-table.h
 
 $(SQLITE_SOURCE_PATH):
 	@echo Downloading SQLite source...
@@ -52,15 +51,8 @@ $(SQLITE_AMALGAMATION_PATH):
 	unzip sqlite.zip -d deps/
 	rm -f sqlite.zip
 
-FOLD_TABLES = fold-table.h fold-diacritic-table.h
-
-$(TARGET_LOADABLE): $(SQLITE_SOURCE_PATH) $(SQLITE_AMALGAMATION_PATH) $(FOLD_TABLES) $(prefix)
+$(TARGET_LOADABLE): better-trigram.c better-trigram.h tokenizer.c $(SQLITE_SOURCE_PATH) $(SQLITE_AMALGAMATION_PATH) $(prefix)
 	$(CC) $(CFLAGS) $(CONDITIONAL_CFLAGS) -shared -fPIC -o $@ better-trigram.c
-
-$(FOLD_TABLES): gen-fold-table.c $(SQLITE_SOURCE_PATH)
-	$(CC) $(CFLAGS) -o gen-fold-table gen-fold-table.c $(CONDITIONAL_CFLAGS)
-	./gen-fold-table
-	rm -f gen-fold-table
 
 $(TARGET_FTS5): $(SQLITE_SOURCE_PATH) $(SQLITE_AMALGAMATION_PATH) $(prefix)
 	dir=$(SQLITE_SOURCE_PATH) \
