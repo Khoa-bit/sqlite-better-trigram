@@ -5,22 +5,18 @@ import type { Token } from "./types";
  *
  * Core structure:
  *   postings:  Map<token, Map<docId, number[]>>
- *   docs:      Map<docId, originalText>  — for post-filter verification
+ *   docs:      Map<docId, originalText>
  *   docTokens: Map<docId, Set<token>>     — O(tokens_in_doc) removal
  */
 export class InvertedIndex {
   private postings = new Map<string, Map<number, number[]>>();
   private docs = new Map<number, string>();
-  private foldedDocs = new Map<number, string>();
   private docTokens = new Map<number, Record<string, true>>();
-  private cachedAllDocIds: number[] | null = null;
 
   // ── Mutation ──
 
-  add(docId: number, tokens: Token[], originalText: string, foldedText?: string): void {
+  add(docId: number, tokens: Token[], originalText = ""): void {
     this.docs.set(docId, originalText);
-    this.foldedDocs.set(docId, foldedText ?? originalText);
-    this.cachedAllDocIds = null;
 
     let tokenSet = this.docTokens.get(docId);
     if (!tokenSet) {
@@ -61,16 +57,12 @@ export class InvertedIndex {
     }
     this.docTokens.delete(docId);
     this.docs.delete(docId);
-    this.foldedDocs.delete(docId);
-    this.cachedAllDocIds = null;
   }
 
   clear(): void {
     this.postings.clear();
     this.docs.clear();
-    this.foldedDocs.clear();
     this.docTokens.clear();
-    this.cachedAllDocIds = null;
   }
 
   // ── Query ──
@@ -81,26 +73,6 @@ export class InvertedIndex {
 
   getDoc(docId: number): string | undefined {
     return this.docs.get(docId);
-  }
-
-  getFoldedDoc(docId: number): string | undefined {
-    return this.foldedDocs.get(docId);
-  }
-
-  /** Returns true if at least one of the given tokens has a posting list. */
-  hasAnyPosting(tokens: string[]): boolean {
-    for (const t of tokens) {
-      if (this.postings.has(t)) return true;
-    }
-    return false;
-  }
-
-  /** All doc IDs — used for fallback full-text scan. */
-  getAllDocIds(): number[] {
-    if (this.cachedAllDocIds === null) {
-      this.cachedAllDocIds = Array.from(this.docs.keys());
-    }
-    return this.cachedAllDocIds;
   }
 
   /**

@@ -26,11 +26,6 @@ describe("substring search", () => {
     expect(result).toEqual([1, 3]);
   });
 
-  test("search 'lo wo' cross-word substring", () => {
-    const result = engine.search("lo wo");
-    expect(result).toEqual([1]);
-  });
-
   test("search 'xyz' not found", () => {
     expect(engine.search("xyz")).toEqual([]);
   });
@@ -361,12 +356,12 @@ describe("prefix search", () => {
     expect(engine.searchPhrase("")).toEqual([]);
   });
 
-  test("backward compat: engine without prefixSearch uses trigram substrings", () => {
+  test("backward compat: engine without prefixSearch uses trigram postings", () => {
     const old = new SearchEngine();
     old.addDocument(1, "hello world");
     expect(old.search("hello")).toEqual([1]);
-    // Without prefixSearch, 2-char "he" falls through to full-text scan → matches
-    expect(old.search("he")).toEqual([1]);
+    // No prefix index: 2-char "he" is not a trigram, so it matches nothing.
+    expect(old.search("he")).toEqual([]);
     expect(old.search("xyz")).toEqual([]);
     expect(old.searchPhrase("hello world")).toEqual([1]);
   });

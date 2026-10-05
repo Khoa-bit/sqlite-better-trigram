@@ -1,7 +1,7 @@
 import { InvertedIndex } from "./inverted-index";
 import { TrigramTokenizer } from "./tokenizer";
 import { TokenKind, type Token, type TokenizerOptions } from "./types";
-import { fold, isWhitespace } from "./unicode";
+import { isWhitespace } from "./unicode";
 
 /**
  * High-level search engine combining tokenizer + inverted index.
@@ -32,11 +32,8 @@ import { fold, isWhitespace } from "./unicode";
  *
  * Query flow:
  *   1. Tokenize query → trigram tokens
- *   2. trigramIndex.intersect(trigrams) → candidate docIds
- *   3. Post-filter: verify folded query appears as substring in folded
- *      document text
- *   4. If intersection empty, fallback to full-text scan (handles
- *      cross-word substrings like "lo wo" in "hello world")
+ *   2. trigramIndex.intersect(trigrams) → matching docIds (implicit AND,
+ *      i.e. SQLite `MATCH` semantics — no substring post-filter)
  *
  * **With prefixSearch** (enabled)
  * ────────────────────────────────
@@ -126,7 +123,6 @@ export class SearchEngine {
 
   addDocument(docId: number, text: string): void {
     const tokens = this.tokenizer.tokenize(text);
-    const foldedText = fold(text, this.tokenizer.options);
     if (this.prefixIndex) {
       const trigramTokens: Token[] = [];
       const prefixTokens: Token[] = [];
@@ -134,10 +130,10 @@ export class SearchEngine {
         if (t.kind === TokenKind.Prefix) prefixTokens.push(t);
         else trigramTokens.push(t);
       }
-      this.trigramIndex.add(docId, trigramTokens, text, foldedText);
-      this.prefixIndex.add(docId, prefixTokens, text, foldedText);
+      this.trigramIndex.add(docId, trigramTokens, text);
+      this.prefixIndex.add(docId, prefixTokens, text);
     } else {
-      this.trigramIndex.add(docId, tokens, text, foldedText);
+      this.trigramIndex.add(docId, tokens, text);
     }
   }
 
@@ -155,11 +151,11 @@ export class SearchEngine {
   // ── Substring search ──
 
   /**
-   * Search for documents containing `query` as a substring.
+   * Search for documents matching `query` (SQLite `MATCH` semantics).
    *
-   * 1. Tokenize query → trigrams
-   * 2. Intersect posting lists
-   * 3. Post-filter: verify folded original text contains folded query
+   * 1. Tokenize query → tokens
+   * 2. Route to prefix index (1-2 char word-starts) and/or trigram index
+   * 3. Intersect posting lists (implicit AND)
    */
   search(query: string): number[] {
     if (query.length === 0) return [];
@@ -174,44 +170,17 @@ export class SearchEngine {
       return this.searchWithPrefix(query, queryTokens);
     }
 
-    return this.searchWithTrigram(query, tokenTexts);
+    return this.searchWithTrigram(tokenTexts);
   }
 
 
 
   /**
-   * Search using single trigram index (prefixSearch disabled).
+   * Search using the single trigram index (prefixSearch disabled).
+   * Plain posting-list intersection (SQLite `MATCH`).
    */
-  private searchWithTrigram(query: string, tokenTexts: string[]): number[] {
-    const candidates = this.trigramIndex.intersect(tokenTexts);
-    const foldedQuery = fold(query, this.tokenizer.options);
-
-    if (candidates.length > 0) {
-      return candidates.filter((docId) => {
-        const doc = this.trigramIndex.getFoldedDoc(docId);
-        return (
-          doc !== undefined &&
-          doc.includes(foldedQuery)
-        );
-      });
-    }
-
-    // Fallback: full-text scan when index can't handle query
-    // (e.g. cross-word-boundary substrings like "lo wo" in "hello world").
-    //
-    // With prefixSearch: if no token has postings, it's a certain miss.
-    // Without prefixSearch: always try the scan (short queries like "he"
-    // have no trigram postings but may still match via substring scan).
-    if (!this.prefixIndex || this.trigramIndex.hasAnyPosting(tokenTexts)) {
-      return this.trigramIndex.getAllDocIds().filter((docId) => {
-        const doc = this.trigramIndex.getFoldedDoc(docId);
-        return (
-          doc !== undefined &&
-          doc.includes(foldedQuery)
-        );
-      });
-    }
-    return [];
+  private searchWithTrigram(tokenTexts: string[]): number[] {
+    return this.trigramIndex.intersect(tokenTexts);
   }
 
   /**
@@ -230,14 +199,11 @@ export class SearchEngine {
    *   - Prefix tokens mid-word → SKIP (artifacts of longer words)
    *   - Partial trigram tokens (<3 chars, EOF flush) → prefix index
    *
-   * Post-filter is skipped for prefix-index results because the prefix
-   * index is already exact (word-starts only). For mixed queries the
-   * intersection of prefix + trigram results is likewise correct.
+   * Prefix-index results are already exact (word-starts only); for mixed
+   * queries the prefix + trigram intersections are combined directly.
    *
-   * When all tokens route to trigram index (no genuine short tokens),
-   * delegates to searchWithTrigram for standard trigram + post-filter.
-   *
-   * Full-text scan fallback handles cross-word substrings like "lo wo".
+   * When all tokens route to the trigram index (no genuine short tokens),
+   * delegates to searchWithTrigram.
    */
   private searchWithPrefix(query: string, queryTokens: Token[]): number[] {
     const shortTokens: string[] = [];
@@ -281,27 +247,11 @@ export class SearchEngine {
       candidates = longCandidates!;
     }
 
-    // All tokens >= 3 chars: delegate to standard trigram path.
-    if (!hasShort) return this.searchWithTrigram(query, longTokens);
+    // All tokens >= 3 chars: trigram intersection.
+    if (!hasShort) return this.searchWithTrigram(longTokens);
 
-    // Mixed query with short tokens: skip post-filter.
-    // Prefix index is exact (word-starts only), not substring.
-    // Intersection of prefix + trigram results is semantically correct.
-    if (candidates.length > 0) return candidates;
-
-    // Full-text scan fallback for cross-word substrings.
-    // Only if at least one token has postings — otherwise it's a certain miss.
-    if (this.trigramIndex.hasAnyPosting(longTokens) || this.prefixIndex?.hasAnyPosting(shortTokens)) {
-      const foldedQuery = fold(query, this.tokenizer.options);
-      return this.trigramIndex.getAllDocIds().filter((docId) => {
-        const doc = this.trigramIndex.getFoldedDoc(docId);
-        return (
-          doc !== undefined &&
-          doc.includes(foldedQuery)
-        );
-      });
-    }
-    return [];
+    // Mixed short + long: intersection of the prefix and trigram postings.
+    return candidates;
   }
 
   /**

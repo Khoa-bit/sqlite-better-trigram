@@ -975,8 +975,8 @@ describe("cjk", () => {
     // NOTE: standalone stroke letters like đ (U+0111) are no longer folded by
     // the extension — the custom patch was removed and now lives app-side in
     // the JS fold (src/unicode.ts). Only combining-mark diacritics are stripped
-    // here, so "duong"/"dep" no longer match. See sql-js-parity.test.ts for the
-    // app-side folding scheme that does handle them.
+    // here, so "duong"/"dep" no longer match. See the app-side folding scheme
+    // in JS (src/unicode.ts) and test/multi-column-search.test.ts.
 
     // "tieng viet" matches "Tiếng Việt" (FTS5 AND semantics)
     sqlTest(
